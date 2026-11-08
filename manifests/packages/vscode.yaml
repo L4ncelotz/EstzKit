@@ -1,0 +1,22 @@
+schema_version: 1
+name: vscode
+category: editor
+windows:
+  provider: winget
+  package: Microsoft.VisualStudioCode
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: code
+  args: [--version]
+  expect_regex: "^\\d+"
+detect:
+  command: code
+  args: [--version]
+  winget_id: Microsoft.VisualStudioCode
+security:
+  allow_scripts: false
+  allow_elevation: false

@@ -1,0 +1,18 @@
+schema_version: 1
+name: redis
+category: database
+windows:
+  provider: winget
+  package: Redis.Redis
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: redis-cli
+  args: [--version]
+  expect_regex: "^redis-cli"
+security:
+  allow_scripts: false
+  allow_elevation: false

@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://estzkit.dev/schemas/profile.schema.json",
+  "title": "ProfileManifest",
+  "type": "object",
+  "required": ["schema_version", "name", "display_name", "packages"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "display_name": { "type": "string" },
+    "packages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    }
+  }
+}

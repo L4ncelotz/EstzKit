@@ -1,0 +1,18 @@
+schema_version: 1
+name: wsl2
+category: virtualization
+windows:
+  provider: winget
+  package: Microsoft.WSL
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: machine
+verify:
+  command: wsl
+  args: [--version]
+  expect_regex: "WSL"
+security:
+  allow_scripts: false
+  allow_elevation: true

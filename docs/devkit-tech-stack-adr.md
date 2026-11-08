@@ -2,6 +2,7 @@
 
 **Deciders:** Estz (solo maintainer, future OSS contributors)
 **Date:** 2026-09-03
+**Last updated:** 2026-11-08 (ADR-007 … ADR-010 — scaffold decisions Q1–Q4)
 **Context:** เลือก stack ที่ solo dev คนเดียวดูแลได้จริง แต่ยัง scale ไปเป็น open source community project ได้โดยไม่ต้อง rewrite
 
 ---
@@ -133,17 +134,84 @@ Ironic แต่ต้องเลือก: ตัว DevKit เองก็ต
 
 ---
 
+
+## ADR-007: Workspace Layout, Version Pins, IPC Type Generation (ต่อยอด ADR-001/002)
+
+**Status:** Accepted
+**Date:** 2026-11-08
+
+### Context
+ADR-001/002 ระบุ Tauri + Rust + React แต่ไม่ล็อกเวอร์ชันหรือเลย์เอาต์ของโค้ด ต้องตัดสินก่อน scaffold เพื่อให้ `core` เทสได้โดยไม่พึ่ง webview และให้ CLI เป็น vertical slice ได้ก่อนมี UI
+
+### Decision
+- **Tauri v2, pin `~2.12`** (stable ล่าสุดตอนเช็ก crates.io วันที่ 2026-11-08 คือ 2.12.5 ออก 2026-10-21; สาย 3.x ยังเป็น alpha จึงไม่ใช้ — pin `~2.12` ใน `Cargo.toml` ของ `src-tauri`, รู้ตนว่า version table ใน note นี้จะล้าสมัยในไม่ช้า ให้เช็ก crates.io ซ้ำเมื่อ bump)
+- **`rust-toolchain.toml`: channel `1.99`** (Rust stable 1.99.1 ตอนนี้; Tauri 2.12 MSRV คือ 1.95 จึงผ่านแบบเหลือเฟือ)
+- **เลย์เอาต์ workspace:** root `Cargo.toml` เป็น `[workspace]` (`members = ["crates/*", "src-tauri"]`); `crates/core` เป็น Rust library ล้วน **ห้าม depend บน tauri**; `crates/cli` เรียก core ตรง ๆ; `src-tauri` เหลือแค่ IPC adapter; `src/` เป็น React source; `manifests/` และ `schemas/` อยู่ที่ root
+- **Event flow:** core ส่ง progress ผ่าน trait `EventSink` (ไม่มี Tauri อยู่ใน core); `src-tauri` implement `EventSink` ด้วยการ `emit("install:state_changed", …)`; CLI implement ด้วยการพิมพ์ stdout — ทำให้เทสและรัน core แบบ headless ได้
+- **IPC types: `ts-rs`** (generate TypeScript จาก Rust struct) แทน tauri-specta เพราะ ts-rs ไม่ผูกชนิดกับ runtime ของ Tauri และดึง into core ได้โดยไม่ละเมิดเงื่อนไข "core ห้ามรู้จัก Tauri"; คัมมา `src/types/ipc.ts` เขียนมือตาม DTO ใน `crates/core` ชั่วคราวจนกว่า toolchain พร้อมรัน generator
+
+---
+
+## ADR-008: UAC / Administrator Elevation Policy (ต่อยอด ADR-001, Q2)
+
+**Status:** Accepted
+**Date:** 2026-11-08
+
+### Context
+การติดตั้ง dev tools ส่วนใหญ่บน Windows ผ่าน winget (Docker Desktop, WSL, Git ฯลฯ) ต้องการสิทธิ์ Administrator เป็นครั้งคราว แต่ DevKit เป็นแอป UI ที่ไม่ควร waste attack surface
+
+### Options Considered
+
+| ทางเลือก | ข้อดี | ข้อเสีย |
+|---|---|---|
+| A. แอปรันสิทธิ์ปกติ ให้ installer เด้ง UAC เอง | ง่ายสุด, ปลอดภัยสุดตาม least privilege | UAC เด้งหลายครั้งต่อหนึ่ง plan |
+| B. Elevated helper process (spawn ผ่าน `runas` ครั้งเดียว, คุยกันผ่าน named pipe) | UAC ครั้งเดียวต่อ plan | ซับซ้อน ต้องออกแบบ IPC + trust boundary |
+| C. ตั้ง app manifest เป็น `requireAdministrator` | โค้ดง่าย | ทั้ง webview รันเป็น admin — attack surface + ขัดกับ security model ใน System Design §3.6 |
+
+### Decision
+**A สำหรับ MVP, ย้ายไป B ใน v2, ห้าม C** — ออกแบบให้ `install.scope` (`user` เมื่อ package รองรับ เพื่อลด prompt), แปลความ `allow_elevation: true` ว่า "package นี้คาดว่าจะขอ UAC" เพื่อให้ UI เตือนก่อนเริ่ม (นับจำนวนครั้งที่คาดไว้), และ map exit code `1223` (ERROR_CANCELLED) เป็น state `paused` ไม่ใช่ `failed`; exit code `3010` (reboot required — สำคัญมากสำหรับ WSL2 → Docker) บันทึก plan ลง SQLite, แสดง banner "ต้อง restart เครื่อง", แล้ว resume หลัง reboot; **ห้าม hardcode mapping ของ winget เอง** ต้องทดสอบบน VM จริงแล้วทำตารางจากผลที่เห็น
+
+---
+
+## ADR-009: Manifest Source ใน MVP — Bundled + Dir Override (ต่อยอด ADR-005, Q3)
+
+**Status:** Accepted
+**Date:** 2026-11-08
+
+### Context
+ADR-005 เลือก Git-based registry สำหรับระยะยาว แต่ MVP ยังไม่มี registry จริงและไม่ควรพึ่ง network/cache invalidation/supply-chain ตั้งแต่ core engine ยังไม่เสถียร
+
+### Decision
+ฝังโฟลเดอร์ `manifests/` เข้า binary ตอน build (`rust-embed`) จับคู่กับ `DirSource` ที่อ่านจากโฟลเดอร์ local ผ่าน flag `--manifest-dir` / env `ESTZKIT_MANIFESTS` สำหรับ dev (แก้ YAML แล้วทดสอบได้ทันที ไม่ต้อง rebuild); ออกแบบเป็น trait `ManifestSource { packages(), profiles() }` ตั้งแต่ต้น โดย MVP มี `BundledSource` + `DirSource` และ v2 เพิ่ม `GitSource` (pin ด้วย commit hash ตามที่ ADR-005 วางไว้); JSON Schema validation รันใน CI ตั้งแต่ตอนนี้ — deterministic เพราะเวอร์ชันแอป = เวอร์ชัน manifest และเข้ากับ security model "ไม่รัน manifest ที่ไม่ผ่าน review" ตรง ๆ
+
+---
+
+## ADR-010: Layered Detection + 3-State Result (ต่อยอด F1, Q4)
+
+**Status:** Accepted
+**Date:** 2026-11-08
+
+### Context
+Design เดิม (F1) กำหนดแค่ "ตรวจจับของที่มีอยู่แล้ว" โดยไม่ระบุวิธีหรือผลลัพธ์ที่ planner ต้องการเพื่อตัดสินใจ skip / upgrade / เตือน
+
+### Decision
+ตรวจจับแบบหลายชั้น เรียงตามความน่าเชื่อถือ: (1) รัน verify/detect command ตาม manifest (`command --version` + `expect_regex`) — ตอบคำถามจริง "เครื่องมือนี้ใช้ได้ไหม" และครอบคลุมของนอก winget ด้วย; (2) fallback `winget list --id <X> --exact` สำหรับ GUI app ที่ไม่มี CLI ใน PATH (ผล cache ต่อ session เพราะช้าและ parse เปราะ); (3) Registry Uninstall keys (`HKLM`/`HKCU` + `WOW6432Node`) สำหรับ scan เร็วตอนเปิดแอปเมื่อจำเป็น — เพิ่ม `detect:` block ใน manifest เป็น optional (ไม่ระบุให้ใช้ `verify` แทน); ผลลัพธ์มี 3 สถานะเสมอ (`missing` / `installed_ok` / `installed_version_mismatch`) เพื่อให้ planner ตัดสินใจ; **reload PATH จาก registry ก่อน verify** (โปรเซสที่รันอยู่ไม่เห็น PATH ที่ installer เพิ่งแก้) ไม่เช่นนั้นจะได้ false negative หลังติดตั้งสำเร็จ
+
+---
+
 ## สรุป Final Stack (ตารางเดียวจบ)
 
 | Layer | เลือก | เหตุผลสั้น |
 |---|---|---|
-| Desktop shell | **Tauri** | เบา เร็ว เหมาะ system utility |
-| Core logic | **Rust** | บังคับจาก Tauri + เหมาะงาน system-level |
-| Frontend | **React + TypeScript** | contributor pool ใหญ่สุดสำหรับ OSS |
-| Local state | **SQLite (rusqlite)** | ACID, resumability, query ได้ในอนาคต |
-| Manifest registry | **Git repo + YAML** | ฟรี, PR review = audit trail, versioning ในตัว |
-| Build package manager | **pnpm** | เร็ว, เสถียร, deterministic lockfile |
-| Provider (MVP) | **Winget only** | scope เล็กสุดที่ ship ได้จริง, abstraction เปิดทางขยาย |
+| Desktop shell | **Tauri v2, pin `~2.12`** | เบา เร็ว เหมาะ system utility; stable ล่าสุด 2.12.5 (เช็ก crates.io 2026-11-08), 3.x ยัง alpha |
+| Core logic | **Rust 1.99 (`rust-toolchain.toml`)** | บังคับจาก Tauri + เหมาะงาน system-level; `crates/core` ห้าม depend บน tauri |
+| IPC type generation | **ts-rs** | gen TS จาก Rust struct โดยไม่ผูก core กับ Tauri runtime |
+| Frontend | **React 19 + TypeScript 7** | contributor pool ใหญ่สุดสำหรับ OSS |
+| Local state | **SQLite (rusqlite, bundled)** | ACID, resumability, query ได้ในอนาคต |
+| Manifest registry (MVP) | **Bundled YAML + `DirSource` override; Git registry ใน v2** | deterministic ตั้งแต่วันแรก, ไม่พึ่ง network/cache |
+| Elevation (MVP) | **Standard user (option A); helper ใน v2; ห้าม `requireAdministrator`** | least privilege; UAC ครั้งเดียวที่ v2 |
+| Build package manager | **pnpm 12** | เร็ว, เสถียร, deterministic lockfile (`packageManager: pnpm@12.18.0`) |
+| Provider (MVP) | **Winget only + `--scope user` เมื่อรองรับ** | scope เล็กสุดที่ ship ได้จริง, abstraction เปิดทางขยาย |
 | Install strategy (MVP) | **package_manager only** (ห้าม script) | ตัด attack surface ใหญ่สุดออกก่อน |
 
 ## Consequences
@@ -164,8 +232,11 @@ Ironic แต่ต้องเลือก: ตัว DevKit เองก็ต
 - เมื่อ community เริ่มส่ง PR จำนวนมาก → ยกระดับจาก "human review" เป็น automated policy check ตามที่วางไว้ใน security design
 
 ## Action Items
-1. [ ] Scaffold Tauri + Rust + React project (cargo workspace แยก `core` crate ออกจาก `app` crate เพื่อ testability)
-2. [ ] Define SQLite schema เวอร์ชันแรก (plans, steps, detected_packages tables)
-3. [ ] สร้าง JSON Schema สำหรับ validate manifest YAML ใน CI
-4. [ ] เขียน Provider trait + WingetProvider implementation ตัวแรก
-5. [ ] ตั้ง pnpm workspace + Tauri dev script
+1. [x] Scaffold Tauri + Rust + React project (cargo workspace: `crates/core` + `crates/cli` + `src-tauri` + `src/`)
+2. [x] Define SQLite schema เวอร์ชันแรก (plans, steps, detected_packages tables)
+3. [x] สร้าง JSON Schema สำหรับ validate manifest YAML (`schemas/`, validate ใน CI ผ่าน `pnpm run validate:manifests`)
+4. [x] เขียน Provider trait + WingetProvider implementation ตัวแรก
+5. [x] ตั้ง pnpm workspace + Tauri dev script
+6. [ ] ติดตั้ง Rust 1.99 (rustup) + MSVC Build Tools บนเครื่อง dev แล้วรัน `cargo test` (skipped 2026-11-08 — ไม่มี toolchain บนเครื่องนี้ ยัง build ไม่ได้)
+7. [ ] ทดสอบ winget บน VM จริงแล้วทำตาราง mapping exit code (1223, 3010, …) จากผลที่เห็น ห้าม hardcode ไม่มีหลักฐาน
+8. [ ] v2: เพิ่ม `GitSource` (pin ด้วย commit hash) ต่อยอด manifest trait จาก ADR-009

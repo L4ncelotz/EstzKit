@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://estzkit.dev/schemas/package.schema.json",
+  "title": "PackageManifest",
+  "type": "object",
+  "required": ["schema_version", "name", "category", "install", "verify", "security"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "category": { "type": "string" },
+    "windows": { "$ref": "#/definitions/osProvider" },
+    "macos": { "$ref": "#/definitions/osProvider" },
+    "linux": { "$ref": "#/definitions/osProvider" },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "install": {
+      "type": "object",
+      "required": ["strategy", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": { "type": "string", "enum": ["package_manager", "direct", "script"] },
+        "scope": { "type": "string", "enum": ["user", "machine"] }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "required": ["command", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "expect_regex": { "type": ["string", "null"] }
+      }
+    },
+    "detect": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["command"] }, { "required": ["winget_id"] }],
+      "properties": {
+        "command": { "type": "string" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "winget_id": { "type": "string" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "required": ["allow_scripts", "allow_elevation"],
+      "additionalProperties": false,
+      "properties": {
+        "allow_scripts": { "type": "boolean" },
+        "allow_elevation": { "type": "boolean" }
+      }
+    }
+  },
+  "definitions": {
+    "osProvider": {
+      "type": "object",
+      "required": ["provider", "package"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["winget", "brew", "apt"] },
+        "package": { "type": "string" },
+        "version": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+schema_version: 1
+name: git
+category: vcs
+windows:
+  provider: winget
+  package: Git.Git
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: git
+  args: [--version]
+  expect_regex: "^git version"
+security:
+  allow_scripts: false
+  allow_elevation: false

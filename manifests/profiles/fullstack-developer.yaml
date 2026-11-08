@@ -1,0 +1,4 @@
+schema_version: 1
+name: fullstack-developer
+display_name: Fullstack Developer
+packages: [node, pnpm, bun, git, vscode, docker, postgresql, redis]

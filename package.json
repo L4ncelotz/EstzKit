@@ -1,0 +1,31 @@
+{
+  "name": "estzkit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "validate:manifests": "node scripts/validate-manifests.mjs",
+    "types:gen": "cargo test --manifest-path crates/core/Cargo.toml --features ts-export"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/js-yaml": "^4",
+    "@vitejs/plugin-react": "6.2.1",
+    "ajv": "^8",
+    "js-yaml": "^4",
+    "typescript": "7.0.2",
+    "vite": "8.3.6"
+  }
+}

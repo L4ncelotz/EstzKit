@@ -1,0 +1,18 @@
+schema_version: 1
+name: postgresql
+category: database
+windows:
+  provider: winget
+  package: PostgreSQL.PostgreSQL.17
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: machine
+verify:
+  command: psql
+  args: [--version]
+  expect_regex: "^psql"
+security:
+  allow_scripts: false
+  allow_elevation: true

@@ -1,0 +1,13 @@
+[package]
+name = "estzkit-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "EstzKit command-line interface (thin wrapper over estzkit-core)"
+
+[[bin]]
+name = "estzkit-cli"
+path = "src/main.rs"
+
+[dependencies]
+estzkit-core = { path = "../core" }

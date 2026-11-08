@@ -1,0 +1,18 @@
+schema_version: 1
+name: bun
+category: runtime
+windows:
+  provider: winget
+  package: Oven.Bun
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: bun
+  args: [--version]
+  expect_regex: "^\\d+"
+security:
+  allow_scripts: false
+  allow_elevation: false
