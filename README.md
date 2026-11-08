@@ -8,10 +8,10 @@ Status: **v0.1-rc** — Core installer engine, dependency resolver, SQLite resum
 
 | Layer | Choice |
 |---|---|
-| Desktop shell | Tauri v2, pin `~2.12` (2.12.5 latest stable at check time) |
+| Desktop shell | Tauri v2 (runtime `tauri ~2.12` / build-time `tauri-build ~2.7` decoupled versioning) |
 | Core logic | Rust 1.99 (`rust-toolchain.toml`), `crates/core` has no tauri dep |
 | CLI | `crates/cli` (estzkit-cli) — vertical slice calling core directly |
-| Frontend | React 19 + TypeScript 7, `src/`, types via ts-rs |
+| Frontend | React 19 + TypeScript 7.0.2, `src/`, types via ts-rs |
 | Local state | SQLite (`rusqlite`, bundled) |
 | Manifest source (MVP) | Bundled YAML + `ESTZKIT_MANIFESTS`/`--manifest-dir` override; Git registry in v2 |
 | Elevation (MVP) | Standard user (option A); no `requireAdministrator` |
@@ -21,8 +21,9 @@ Status: **v0.1-rc** — Core installer engine, dependency resolver, SQLite resum
 
 ## Docs
 
-- [System Design](docs/devkit-system-design.md) — requirements, data flow, state machine, provider trait, error codes, security model
-- [Tech Stack ADR](docs/devkit-tech-stack-adr.md) — decisions ADR-001 … ADR-010, final stack, action items
+- [System Design](docs/estzkit-system-design.md) — requirements, data flow, state machine, provider trait, error codes, security model
+- [Tech Stack ADR](docs/estzkit-tech-stack-adr.md) — decisions ADR-001 … ADR-010, final stack, action items
+- [VM Testing Playbook](docs/vm-testing-playbook.md) — manual & sandbox verification guide for exit codes and reboot-resume
 
 ## Layout
 
@@ -43,13 +44,32 @@ docs/               system design + ADRs
 
 ## Quick start
 
+### Frontend & Manifest Validation
+
 ```bash
 pnpm install
-pnpm run validate:manifests   # JSON Schema check on manifests/
-pnpm run dev                  # vite dev server (frontend only; needs Rust build for IPC)
+pnpm run validate:manifests   # validate packages & profiles against JSON Schemas
+pnpm run dev                  # vite dev server (UI preview)
+pnpm run tauri:build          # compile desktop app & produce .msi/.exe installer
 ```
 
-Rust side requires Rust 1.99 (rustup) + MSVC Build Tools + WebView2 SDK on Windows — `cargo test` once the toolchain is installed.
+### CLI (Headless Core)
+
+`estzkit-cli` runs directly without webview/Tauri:
+
+```bash
+cargo run -p estzkit-cli -- packages              # list available manifests
+cargo run -p estzkit-cli -- profiles              # list developer profiles
+cargo run -p estzkit-cli -- detect                # probe installed packages on this machine
+cargo run -p estzkit-cli -- plan node git docker  # preview dependency-ordered install plan
+cargo run -p estzkit-cli -- install git node      # execute installation via winget
+```
+
+Unit tests (run in CI on `windows-latest` or locally):
+
+```bash
+cargo test -p estzkit-core
+```
 
 ## Why not `winget configure`?
 
@@ -76,7 +96,7 @@ When launching the installer (`.msi` / `.exe`), Windows Defender SmartScreen may
 1. Click **More info**.
 2. Click **Run anyway**.
 
-Trusted EV code signing certificates will be introduced in future community releases.
+EstzKit is non-commercial open source. Binary packages remain intentionally unsigned to keep the project completely free. If community sponsorship or funding permits, Azure Trusted Signing will be adopted for future release channels.
 
 ## Screenshots
 

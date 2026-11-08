@@ -1,4 +1,4 @@
-# DevKit — System Design Document
+# EstzKit — System Design Document
 
 *Developer Workstation Installer / Orchestration Layer*
 *Status: implemented scaffold 2026-11-08 (Tauri v2 + Rust core + React 19; decisions ADR-007 … ADR-010). Section 2.1 เป็น reference design ของ core pipeline; contracts ที่ implement จริงอยู่ที่ `crates/core` (Rust) / `src-tauri` (IPC) / `src` (React).*
@@ -136,7 +136,7 @@ payload: { plan_id, package_id, state: StepState, message?, error? }
 ### 2.4 Storage Choices
 
 - **Manifest source**: MVP — ฝัง `manifests/` (YAML) เข้า binary ตอน build (`BundledSource` + `DirSource` override สำหรับ dev); v2 — Git repository + `GitSource` pin ด้วย commit hash, versioning ได้ฟรีจาก git history, PR review flow ธรรมชาติ
-- **Local state**: SQLite ไฟล์เดียวใน `%APPDATA%/devkit/state.db` — เก็บ install history, current plan state (สำหรับ resume หลัง restart app)
+- **Local state**: SQLite ไฟล์เดียวใน `%APPDATA%/estzkit/state.db` (หรือผ่าน `$ESTZKIT_STORE` / `estzkit.db`) — เก็บ install history, current plan state (สำหรับ resume หลัง restart app)
 - **Config**: TOML ไฟล์ local สำหรับ user preference (เช่น default profile, proxy settings)
 
 ---
@@ -268,7 +268,7 @@ order = topological_sort(graph)
 
 ## 4. Scale & Reliability
 
-*(หมายเหตุ: DevKit เป็น desktop client-side tool ไม่ใช่ web service ดังนั้น "scale" หมายถึง scale ของจำนวน package/profile และจำนวน installation ต่อเครื่อง ไม่ใช่ concurrent request)*
+*(หมายเหตุ: EstzKit เป็น desktop client-side tool ไม่ใช่ web service ดังนั้น "scale" หมายถึง scale ของจำนวน package/profile และจำนวน installation ต่อเครื่อง ไม่ใช่ concurrent request)*
 
 - **Load ที่แท้จริง**: จำนวน package ใน registry (คาดว่าจะโตจาก ~15 → หลายร้อยเมื่อ community มีส่วนร่วม) — โครงสร้าง manifest แบบไฟล์แยก + lazy load ทำให้ scale ได้โดยไม่กระทบ startup time
 - **Failover**: ถ้า provider หนึ่งใช้ไม่ได้ (เช่น winget source ล่ม) ระบบควร fallback ไป strategy อื่นถ้ามี (v2+)
@@ -284,7 +284,7 @@ order = topological_sort(graph)
 | **Tauri แทน Electron** | Binary เล็ก, startup เร็ว, memory ต่ำ | Ecosystem ปลั๊กอินน้อยกว่า, IPC ต้องเขียนเอง |
 | **Manifest = YAML ใน Git** แทน database + API server | ไม่ต้องมี backend, PR review เป็น audit trail ธรรมชาติ, ฟรี hosting (GitHub) | ไม่มี dynamic query, ต้อง sync/pull registry เอง, versioning ต้องคิดเรื่อง cache |
 | **Provider abstraction ตั้งแต่ MVP** แม้รองรับแค่ winget | ขยาย OS ทีหลังไม่ต้อง refactor core | เพิ่ม complexity เล็กน้อยตั้งแต่วันแรกที่ยังไม่ได้ใช้ |
-| **ห้าม `strategy: script` ใน MVP** | ตัดความเสี่ยง security ใหญ่สุดออกไปก่อน | บาง tool ที่ไม่มีใน package manager จะติดตั้งผ่าน DevKit ไม่ได้ในเวอร์ชันแรก |
+| **ห้าม `strategy: script` ใน MVP** | ตัดความเสี่ยง security ใหญ่สุดออกไปก่อน | บาง tool ที่ไม่มีใน package manager จะติดตั้งผ่าน EstzKit ไม่ได้ในเวอร์ชันแรก |
 | **Topological sort แทน full dependency graph solver** | เร็ว เขียนง่าย พอกับ use case จริง | ถ้าอนาคตมี version conflict ซับซ้อนแบบ npm จะต้อง redesign |
 | **SQLite local state แทน stateless** | Resume ได้หลัง crash/restart | เพิ่ม complexity ของ state migration เมื่อ schema state เปลี่ยน |
 | **แอปรันสิทธิ์ปกติ (UAC option A) แทน `requireAdministrator`** | ไม่เปิด attack surface ของ webview-as-admin; คัมมา `allow_elevation` เป็นแค่คำเตือน | UAC เด้งหลายครั้งต่อ plan; elevated helper ใน v2 ถ้าจำเป็น |

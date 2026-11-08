@@ -1,4 +1,4 @@
-# DevKit — Architecture Decision Records (Tech Stack)
+# EstzKit — Architecture Decision Records (Tech Stack)
 
 **Deciders:** Estz (solo maintainer, future OSS contributors)
 **Date:** 2026-09-03
@@ -12,7 +12,7 @@
 **Status:** Accepted
 
 ### Context
-DevKit เป็น system utility ที่ต้องเรียก OS-level command (winget, registry, WSL check) บ่อย ต้อง startup เร็ว และ binary ต้องไม่ใหญ่เกินไปเพราะเป็น "installer" ตัวเอง — ถ้าตัวมันเองหนัก 150MB จะดูย้อนแย้ง
+EstzKit เป็น system utility ที่ต้องเรียก OS-level command (winget, registry, WSL check) บ่อย ต้อง startup เร็ว และ binary ต้องไม่ใหญ่เกินไปเพราะเป็น "installer" ตัวเอง — ถ้าตัวมันเองหนัก 150MB จะดูย้อนแย้ง
 
 ### Options Considered
 
@@ -122,12 +122,12 @@ Manifest ของ package/profile ต้องกระจายให้ clien
 
 ---
 
-## ADR-006: Package Manager สำหรับ build ตัว DevKit เอง — pnpm vs npm vs Bun
+## ADR-006: Package Manager สำหรับ build ตัว EstzKit เอง — pnpm vs npm vs Bun
 
 **Status:** Accepted
 
 ### Context
-Ironic แต่ต้องเลือก: ตัว DevKit เองก็ต้องมี JS package manager สำหรับ build frontend
+Ironic แต่ต้องเลือก: ตัว EstzKit เองก็ต้องมี JS package manager สำหรับ build frontend
 
 ### Decision
 **pnpm** — เร็วกว่า npm, disk-efficient (content-addressable store), lockfile deterministic, เสถียรกว่า Bun ในแง่ ecosystem compatibility ตอนนี้ (2026) Bun น่าสนใจสำหรับ runtime แต่ในฐานะ package manager ของ build tool ที่ต้องการความเสถียรสูงสุด (เพราะ CI/release pipeline พึ่งมัน) pnpm ยังเป็นตัวเลือกที่ risk ต่ำกว่า
@@ -158,7 +158,7 @@ ADR-001/002 ระบุ Tauri + Rust + React แต่ไม่ล็อกเ�
 **Date:** 2026-11-08
 
 ### Context
-การติดตั้ง dev tools ส่วนใหญ่บน Windows ผ่าน winget (Docker Desktop, WSL, Git ฯลฯ) ต้องการสิทธิ์ Administrator เป็นครั้งคราว แต่ DevKit เป็นแอป UI ที่ไม่ควร waste attack surface
+การติดตั้ง dev tools ส่วนใหญ่บน Windows ผ่าน winget (Docker Desktop, WSL, Git ฯลฯ) ต้องการสิทธิ์ Administrator เป็นครั้งคราว แต่ EstzKit เป็นแอป UI ที่ไม่ควร waste attack surface
 
 ### Options Considered
 
@@ -237,6 +237,6 @@ Design เดิม (F1) กำหนดแค่ "ตรวจจับขอ�
 3. [x] สร้าง JSON Schema สำหรับ validate manifest YAML (`schemas/`, validate ใน CI ผ่าน `pnpm run validate:manifests`)
 4. [x] เขียน Provider trait + WingetProvider implementation ตัวแรก
 5. [x] ตั้ง pnpm workspace + Tauri dev script
-6. [ ] ติดตั้ง Rust 1.99 (rustup) + MSVC Build Tools บนเครื่อง dev แล้วรัน `cargo test` (skipped 2026-11-08 — ไม่มี toolchain บนเครื่องนี้ ยัง build ไม่ได้)
-7. [ ] ทดสอบ winget บน VM จริงแล้วทำตาราง mapping exit code (1223, 3010, …) จากผลที่เห็น ห้าม hardcode ไม่มีหลักฐาน
+6. [x] รัน `cargo build`, `cargo test`, และ CLI smoke ใน CI (`windows-latest`, Rust 1.99.1 ผ่านเขียว 100%)
+7. [ ] ทดสอบ winget บน VM จริง: exit code 0 และ 20 ได้จาก golden fixtures แล้ว; 1223/3010 และ WSL2->Docker อยู่ใน `docs/vm-testing-playbook.md` และ `scripts/test-sandbox.wsb` รอ maintainer รันยืนยันบน physical environment
 8. [ ] v2: เพิ่ม `GitSource` (pin ด้วย commit hash) ต่อยอด manifest trait จาก ADR-009

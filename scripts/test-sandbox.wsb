@@ -1,0 +1,12 @@
+<Configuration>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>F:\EstzKit</HostFolder>
+      <SandboxFolder>C:\EstzKit</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -ExecutionPolicy Bypass -NoExit -Command "cd C:\EstzKit; Write-Host 'EstzKit Sandbox Test Environment Ready' -ForegroundColor Cyan; Write-Host 'Run: winget --version' -ForegroundColor Yellow"</Command>
+  </LogonCommand>
+</Configuration>
