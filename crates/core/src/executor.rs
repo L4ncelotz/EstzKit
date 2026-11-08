@@ -55,7 +55,8 @@ pub fn run_plan(
             message: message.clone(),
             error: error.clone(),
         });
-        let _ = store.record_step(&plan.id, package_id, state, exit_code, message.as_deref());
+        let detail = message.as_deref().or(error.as_deref());
+        let _ = store.record_step(&plan.id, package_id, state, exit_code, detail);
     };
 
     let mut halted = false;
