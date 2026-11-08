@@ -417,7 +417,7 @@ mod tests {
                 verify: VerifySpec {
                     command: "dep".to_string(),
                     args: vec![],
-                    expect_regex: ".*".to_string(),
+                    expect_regex: None,
                 },
                 detect: None,
                 security: SecuritySpec {
@@ -447,7 +447,7 @@ mod tests {
                 verify: VerifySpec {
                     command: "child".to_string(),
                     args: vec![],
-                    expect_regex: ".*".to_string(),
+                    expect_regex: None,
                 },
                 detect: None,
                 security: SecuritySpec {
@@ -462,13 +462,17 @@ mod tests {
             steps: vec![
                 crate::PlanStep {
                     package_id: "dep".to_string(),
+                    depends_on: vec![],
                     scope: InstallScope::Machine,
                     state: StepState::Pending,
+                    message: None,
                 },
                 crate::PlanStep {
                     package_id: "child".to_string(),
+                    depends_on: vec!["dep".to_string()],
                     scope: InstallScope::Machine,
                     state: StepState::Pending,
+                    message: None,
                 },
             ],
             uac_warnings: 2,
