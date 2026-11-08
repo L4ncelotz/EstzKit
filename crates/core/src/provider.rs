@@ -94,6 +94,12 @@ pub fn parse_winget_list(stdout: &str, status_success: bool, winget_id: &str) ->
     }
     let id_lower = winget_id.to_lowercase();
     for line in stdout.lines() {
+        // Golden fixtures carry `#`-prefixed provenance headers (command,
+        // exit code, ...); winget itself never prints `#` lines, so skip
+        // them instead of treating header tokens as a result row.
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
         let tokens: Vec<&str> = line.split_whitespace().collect();
         let Some(pos) = tokens.iter().position(|t| t.to_lowercase() == id_lower) else {
             continue;
