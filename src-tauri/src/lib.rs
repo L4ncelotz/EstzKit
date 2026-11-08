@@ -65,7 +65,7 @@ impl EventSink for TauriEventSink {
 
 /// Run detection for all package manifests.
 #[tauri::command]
-pub fn detect_installed(state: State<'_, AppState>) -> Result<Vec<DetectedPackage>, String> {
+fn detect_installed(state: State<'_, AppState>) -> Result<Vec<DetectedPackage>, String> {
     let packages = state.packages()?;
     let winget = WingetProvider::new();
     let mut store = state.store.lock().map_err(|e| e.to_string())?;
@@ -82,7 +82,7 @@ pub fn detect_installed(state: State<'_, AppState>) -> Result<Vec<DetectedPackag
 
 /// List profiles from the manifest source.
 #[tauri::command]
-pub fn list_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, String> {
+fn list_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, String> {
     state
         .source
         .profiles()
@@ -101,7 +101,7 @@ pub fn list_profiles(state: State<'_, AppState>) -> Result<Vec<Profile>, String>
 
 /// List packages from the manifest source.
 #[tauri::command]
-pub fn list_packages(state: State<'_, AppState>) -> Result<Vec<PackageSummary>, String> {
+fn list_packages(state: State<'_, AppState>) -> Result<Vec<PackageSummary>, String> {
     state
         .packages()
         .map(|packages| {
@@ -122,17 +122,17 @@ pub fn list_packages(state: State<'_, AppState>) -> Result<Vec<PackageSummary>, 
 
 /// Build (but do not execute) an install plan for `packages`.
 #[tauri::command]
-pub fn plan_install(
+fn plan_install(
     state: State<'_, AppState>,
     packages: Vec<String>,
 ) -> Result<InstallPlan, String> {
-    let plan = build_plan_for(state, &packages)?;
+    let plan = build_plan_for(&state, &packages)?;
     Ok(plan)
 }
 
 /// Execute an install plan, streaming `StepEvent`s to the frontend.
 #[tauri::command]
-pub fn execute_plan(
+fn execute_plan(
     app: AppHandle,
     state: State<'_, AppState>,
     plan: InstallPlan,
@@ -155,7 +155,7 @@ pub fn execute_plan(
 
 /// Resume a previously halted plan (e.g. after a reboot).
 #[tauri::command]
-pub fn resume_plan(
+fn resume_plan(
     app: AppHandle,
     state: State<'_, AppState>,
     plan_id: String,
@@ -172,7 +172,7 @@ pub fn resume_plan(
 /// Request cancellation of a plan. The executor records the request; a
 /// running plan checks it between steps in the future v2 (MVP: recorded).
 #[tauri::command]
-pub fn cancel_plan(state: State<'_, AppState>, plan_id: String) -> Result<(), String> {
+fn cancel_plan(state: State<'_, AppState>, plan_id: String) -> Result<(), String> {
     state
         .cancelled
         .lock()
@@ -183,7 +183,7 @@ pub fn cancel_plan(state: State<'_, AppState>, plan_id: String) -> Result<(), St
 
 /// Query stored steps for a plan (ordered by execution sequence).
 #[tauri::command]
-pub fn get_plan_steps(
+fn get_plan_steps(
     state: State<'_, AppState>,
     plan_id: String,
 ) -> Result<Vec<StoredStep>, String> {
@@ -193,7 +193,7 @@ pub fn get_plan_steps(
 
 /// Retry a single failed/paused step: reinstall just that package.
 #[tauri::command]
-pub fn retry_step(
+fn retry_step(
     app: AppHandle,
     state: State<'_, AppState>,
     plan_id: String,
@@ -201,7 +201,7 @@ pub fn retry_step(
 ) -> Result<StepState, String> {
     let manifests = state.packages()?;
     let by_name = index_by_name(&manifests);
-    let plan = build_plan_for(state, &[package_id.clone()])?;
+    let plan = build_plan_for(&state, &[package_id.clone()])?;
     let provider = provider_for(ProviderKind::Winget);
     let mut store = state.store.lock().map_err(|e| e.to_string())?;
     let mut sink = TauriEventSink { app };
@@ -232,7 +232,7 @@ pub fn retry_step(
 }
 
 /// Shared helper: resolve + detect + build an install plan.
-fn build_plan_for(state: State<'_, AppState>, packages: &[String]) -> Result<InstallPlan, String> {
+fn build_plan_for(state: &AppState, packages: &[String]) -> Result<InstallPlan, String> {
     let manifests = state.packages()?;
     let by_name: HashMap<String, PackageManifest> = index_by_name(&manifests);
     let ordered = resolve(packages, &by_name).map_err(map_err)?;
