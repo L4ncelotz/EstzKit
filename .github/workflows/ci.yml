@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Rust toolchain pinned via rust-toolchain.toml (channel 1.99).
+      # dtolnay/rust-toolchain makes the pin explicit in CI logs.
+      - uses: dtolnay/rust-toolchain@1.99
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: cargo build (core + cli only)
+        run: cargo build -p estzkit-core -p estzkit-cli --locked
+
+      - name: cargo test (core)
+        run: cargo test -p estzkit-core --locked
+
+      - name: CLI smoke — bundled manifests (read-only)
+        run: |
+          cargo run -p estzkit-cli -- packages
+          cargo run -p estzkit-cli -- profiles
+          cargo run -p estzkit-cli -- detect
+          cargo run -p estzkit-cli -- plan node git docker
+
+      # Frontend checks (mirrors local verification).
+      - name: pnpm install
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: validate manifests against JSON Schemas
+        run: corepack pnpm run validate:manifests
+
+      - name: TypeScript typecheck
+        run: corepack pnpm run typecheck
+
+      - name: build frontend
+        run: corepack pnpm run build
