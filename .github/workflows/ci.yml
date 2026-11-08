@@ -25,11 +25,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # No Cargo.lock is committed yet (binary lockfile arrives with the first
+      # green run, then gets committed so subsequent --locked runs are exact).
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
       - name: cargo build (core + cli only)
         run: cargo build -p estzkit-core -p estzkit-cli --locked
 
       - name: cargo test (core)
         run: cargo test -p estzkit-core --locked
+
+      - name: Publish Cargo.lock artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cargo-lock
+          path: Cargo.lock
 
       - name: CLI smoke — bundled manifests (read-only)
         run: |
