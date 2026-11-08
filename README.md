@@ -2,7 +2,7 @@
 
 Developer Workstation Installer / Orchestration Layer — a desktop app that installs a dev environment from declarative profiles (Fullstack, DevOps, Rust, ...) via the packages already on the machine (winget on Windows in MVP).
 
-Status: **scaffolded** — architecture decisions locked (ADR-001 … ADR-010), Cargo workspace + React UI + bundled manifests created 2026-11-08. Rust build pending toolchain install (rustup + MSVC); frontend + manifest validation verified.
+Status: **v0.1-rc** — Core installer engine, dependency resolver, SQLite resume engine, 17 packages, 3 profiles, and CI workflow in place.
 
 ## Stack (locked — see ADR)
 
@@ -50,3 +50,49 @@ pnpm run dev                  # vite dev server (frontend only; needs Rust build
 ```
 
 Rust side requires Rust 1.99 (rustup) + MSVC Build Tools + WebView2 SDK on Windows — `cargo test` once the toolchain is installed.
+
+## Why not `winget configure`?
+
+`winget configure` applies DSC (Desired State Configuration) YAML files directly. While useful for static environments, it leaves critical developer workflow gaps:
+
+- **No profiles / dynamic curation:** Users must maintain manual DSC scripts rather than choosing composable profiles (e.g. Fullstack, DevOps, Rust).
+- **No topological dependency resolution:** Does not resolve complex prerequisite orderings (such as enabling WSL2 before installing Docker Desktop).
+- **No 3-state detection:** Only checks basic package presence, unable to differentiate `missing`, `installed_ok`, and `installed_version_mismatch` via active verification commands.
+- **No verification loop:** Does not execute tool verification commands (`node --version`, `rustup --version`) or validate outputs against regular expressions.
+- **No ACID resumability:** Cannot persist in-flight execution plans across unexpected interruptions or required system reboots.
+
+EstzKit provides this reliability layer on top of native package managers (winget on Windows).
+
+## Windows SmartScreen Notice (v0.1)
+
+v0.1 installer builds are currently **unsigned** to keep the project open and free without upfront certificate costs.
+
+When launching the installer (`.msi` / `.exe`), Windows Defender SmartScreen may display:
+
+> **Windows protected your PC**  
+> Microsoft Defender SmartScreen prevented an unrecognized app from starting.
+
+**To run the installer:**
+1. Click **More info**.
+2. Click **Run anyway**.
+
+Trusted EV code signing certificates will be introduced in future community releases.
+
+## Screenshots
+
+### Profile & Package Selection
+![Profile Picker](docs/screenshots/profile.png)
+
+### Plan Preview & UAC Warnings
+![Plan Preview](docs/screenshots/plan.png)
+
+### Real-time Progress & Persisted Store Logs
+![Install Progress](docs/screenshots/progress.png)
+
+## License
+
+EstzKit is dual-licensed under:
+- [MIT License](LICENSE-MIT)
+- [Apache License 2.0](LICENSE-APACHE)
+
+See [LICENSE](LICENSE) for details.

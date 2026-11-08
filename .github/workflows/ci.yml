@@ -80,10 +80,14 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      - name: pnpm install
-        run: corepack pnpm install --frozen-lockfile
+      - name: Enable corepack and install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm run build
       - name: Build Tauri installer
-        run: corepack pnpm exec tauri build --target x86_64-pc-windows-msvc
+        run: pnpm exec tauri build --target x86_64-pc-windows-msvc
       - name: Upload installer bundle artifacts
         uses: actions/upload-artifact@v4
         with:
