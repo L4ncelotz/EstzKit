@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use estzkit_core::manifest::{DirSource, ManifestSource};
 use estzkit_core::provider::{provider_for, WingetProvider};
 use estzkit_core::{
-    build_plan, detect_package, installed_names, resolve, run_plan, CoreResult, EventSink, PackageManifest, ProviderKind, StepEvent, Store,
+    build_plan, detect_package, resolve, run_plan, CoreResult, EventSink, PackageManifest, ProviderKind, StepEvent, Store,
 };
 
 /// Command-line sink that prints each [`StepEvent`] to stdout.
@@ -57,7 +57,7 @@ fn run() -> CoreResult<()> {
                 .filter(|a| !a.starts_with("--"))
                 .cloned()
                 .collect();
-            print_plan(&packages, &names)
+            print_plan(&packages, &names)?;
         }
         "install" => {
             let names: Vec<String> = args
@@ -67,7 +67,7 @@ fn run() -> CoreResult<()> {
                 .filter(|a| !a.starts_with("--"))
                 .cloned()
                 .collect();
-            install(&packages, &names)
+            install(&packages, &names)?;
         }
         other => {
             eprintln!("unknown command: {other}");
