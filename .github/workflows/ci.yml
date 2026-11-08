@@ -93,8 +93,8 @@ jobs:
         with:
           name: estzkit-installer
           path: |
-            target/release/bundle/**/*.msi
-            target/release/bundle/**/*.exe
+            target/**/release/bundle/**/*.msi
+            target/**/release/bundle/**/*.exe
 
   e2e:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
