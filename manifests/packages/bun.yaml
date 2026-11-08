@@ -3,7 +3,7 @@ name: bun
 category: runtime
 windows:
   provider: winget
-  package: Oven.Bun
+  package: Oven-sh.Bun
   version: null
 depends_on: []
 install:

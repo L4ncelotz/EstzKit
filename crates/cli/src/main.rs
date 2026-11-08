@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use estzkit_core::manifest::{DirSource, ManifestSource};
 use estzkit_core::provider::{provider_for, WingetProvider};
 use estzkit_core::{
-    build_plan, detect_package, resolve, run_plan, CoreResult, EventSink, PackageManifest, ProviderKind, StepEvent, Store,
+    build_plan, detect_package, resolve, resume_plan, run_plan, CoreError, CoreResult, EventSink,
+    PackageManifest, ProviderKind, StepEvent, Store,
 };
 
 /// Command-line sink that prints each [`StepEvent`] to stdout.
@@ -69,6 +70,14 @@ fn run() -> CoreResult<()> {
                 .collect();
             install(&packages, &names)?;
         }
+        "resume" => {
+            let plan_id = args
+                .iter()
+                .skip_while(|a| *a != "resume")
+                .nth(1)
+                .ok_or_else(|| CoreError::PlanNotFound("missing plan_id argument".to_string()))?;
+            resume(&packages, plan_id)?;
+        }
         other => {
             eprintln!("unknown command: {other}");
             print_usage();
@@ -106,6 +115,7 @@ fn print_usage() {
     println!("  detect              detect which packages are installed");
     println!("  plan <names...>     preview an install plan");
     println!("  install <names...>  install the named packages");
+    println!("  resume <plan_id>    resume a plan from store");
 }
 
 fn print_packages(packages: &[PackageManifest]) {
@@ -187,5 +197,24 @@ fn install(packages: &[PackageManifest], names: &[String]) -> CoreResult<()> {
     let mut store = Store::open(&store_path)?;
     let mut sink = StdoutSink;
     run_plan(&plan, &by_name, provider.as_ref(), &mut store, &mut sink)?;
+    let steps = store.steps_for_plan(&plan.id)?;
+    if steps.iter().any(|s| s.state != "Completed" && s.state != "Skipped") {
+        return Err(CoreError::PlanFailed(plan.id));
+    }
+    Ok(())
+}
+
+fn resume(packages: &[PackageManifest], plan_id: &str) -> CoreResult<()> {
+    let by_name = estzkit_core::index_by_name(packages);
+    let provider = provider_for(ProviderKind::Winget);
+    let store_path = std::env::var("ESTZKIT_STORE").unwrap_or_else(|_| "estzkit.db".to_string());
+    let mut store = Store::open(&store_path)?;
+    let mut sink = StdoutSink;
+    println!("resuming plan {plan_id}");
+    resume_plan(plan_id, &by_name, provider.as_ref(), &mut store, &mut sink)?;
+    let steps = store.steps_for_plan(plan_id)?;
+    if steps.iter().any(|s| s.state != "Completed" && s.state != "Skipped") {
+        return Err(CoreError::PlanFailed(plan_id.to_string()));
+    }
     Ok(())
 }

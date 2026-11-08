@@ -41,6 +41,10 @@ pub enum CoreError {
     /// A plan was not found in the store.
     #[error("plan not found: {0}")]
     PlanNotFound(String),
+
+    /// One or more steps in the plan finished in a non-completed state.
+    #[error("plan {0} finished with non-completed steps")]
+    PlanFailed(String),
 }
 
 impl From<rusqlite::Error> for CoreError {
@@ -68,5 +72,7 @@ mod tests {
         assert!(err.to_string().contains("docker"));
         let err = CoreError::UnsupportedStrategy("script".to_string());
         assert!(err.to_string().contains("script"));
+        let err = CoreError::PlanFailed("p-456".to_string());
+        assert!(err.to_string().contains("p-456"));
     }
 }

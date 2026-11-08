@@ -199,6 +199,22 @@ Design เดิม (F1) กำหนดแค่ "ตรวจจับขอ�
 
 ---
 
+## ADR-011: UAC Retry Interim — No Auto-Retry for scope: machine (pending observed)
+
+**Status:** Accepted (interim)
+**Date:** 2026-11-08
+
+### Context
+Approach 1 ลบ mapping `1223→Paused` / `3010→RebootRequired` ออกจาก `map_exit_code` (เหลือ `0→Completed`, อื่นๆ→`Failed`) รอหลักฐานจาก VM จริง แต่ `install_with_retry` เดิม retry ทุก exit ≠0 3 รอบ ผลคือกด **No** ที่ UAC แล้วจะเด้ง UAC ซ้ำภายใน 7 วินาที (1+2+4s) ขัดกับ System Design §3.5 / ADR-008 ที่ระบุ "UAC cancel → Paused, user retry เมื่อพร้อม" และทำให้ `StepState::Paused` กลายเป็น dead state ใน UI/planner (ยังค้าง banner/planner filtering สำหรับ stored plans)
+
+### Decision
+จนกว่าจะมีหลักฐาน ให้ exit ≠0 ของ `scope: machine` เป็น single-attempt (ไม่ auto-retry) ส่วน `scope: user` ยัง retry 3 รอบตามเดิม `map_exit_code` ยังไม่แยก UAC cancel ออกจาก failure — "UAC cancel ยังไม่ถูกแยก จะจัดการหลัง observed" — `Paused`/`RebootRequired` เก็บไว้เป็น reserved state names สำหรับ resume ของ plan แปะไว้กับ stored `state` ใน SQLite และ step 6 จะกลับมา re-wire mapping เมื่อ Observed จาก playbook §3 ลงแล้ว ไม่ทำ "retry เฉพาะกรณีที่ไม่ได้เริ่ม installer เลย" เพราะ provider ส่งกลับแค่ `i32` แยกไม่ออกโดยไม่มีหลักฐาน
+
+### Consequences
+- Machine transient failures ต้องกด retry เอง (ตรง §3.5 ที่กำหนด auto-retry เฉพาะ network)
+- Machine exit ที่เป็น reboot-required จะจบในครั้งเดียวเป็น `Failed` + SQLite state ให้ resume ดู (ไม่ halt แบบ RebootRequired ชั่วคราว)
+- Package ที่มี dependency ล้มเหลวจะถูก cascade เป็น `StepState::Failed` พร้อมเหตุผล `"dependency '<dep>' failed"` และเก็บไว้ใน SQLite สำหรับ resume เมื่อ dependency ได้รับการแก้ไขแล้ว ป้องกันการฝืนรัน downstream installer (เช่น Docker เมื่อ WSL2 ยังไม่พร้อม)
+- Plan status ในตาราง `plans` จะเป็น `"failed"` หากมี step ใดล้มเหลว (ไม่บันทึก `"completed"` ปลอม) และเป็น `"reboot_required"` เมื่อมี step reboot-required
 ## สรุป Final Stack (ตารางเดียวจบ)
 
 | Layer | เลือก | เหตุผลสั้น |

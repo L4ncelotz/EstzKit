@@ -1,7 +1,7 @@
 //! Plan execution: run plan steps in order, emitting and persisting each
 //! transition, verifying after install, and mapping process exit codes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::thread;
 use std::time::Duration;
 
@@ -14,22 +14,13 @@ use crate::store::Store;
 use crate::verify::run_verify;
 use crate::{InstallPlan, StepEvent, StepState};
 
-/// Win32 `ERROR_CANCELLED`: the user cancelled the UAC prompt.
-pub const EXIT_CODE_UAC_CANCELLED: i32 = 1223;
-/// Win32 `ERROR_SUCCESS_REBOOT_REQUIRED`: a reboot is required.
-pub const EXIT_CODE_REBOOT_REQUIRED: i32 = 3010;
-
 /// Map a provider exit code to a step state:
 ///
 /// - `0` → [`StepState::Completed`]
-/// - `1223` (`ERROR_CANCELLED`) → [`StepState::Paused`] ("UAC cancelled - retry when ready")
-/// - `3010` (`ERROR_SUCCESS_REBOOT_REQUIRED`) → [`StepState::RebootRequired`]
 /// - anything else → [`StepState::Failed`]
 pub fn map_exit_code(code: i32) -> StepState {
     match code {
         0 => StepState::Completed,
-        EXIT_CODE_UAC_CANCELLED => StepState::Paused,
-        EXIT_CODE_REBOOT_REQUIRED => StepState::RebootRequired,
         _ => StepState::Failed,
     }
 }
@@ -68,6 +59,8 @@ pub fn run_plan(
     };
 
     let mut halted = false;
+    let mut failed_packages = HashSet::new();
+    let mut any_failed = false;
     for step in &plan.steps {
         if halted {
             continue;
@@ -82,6 +75,25 @@ pub fn run_plan(
                 None,
                 None,
             );
+            continue;
+        }
+
+        let manifest = match by_name.get(&step.package_id) {
+            Some(m) => m,
+            None => {
+                let msg = format!("unknown package {}", step.package_id);
+                emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+                failed_packages.insert(step.package_id.clone());
+                any_failed = true;
+                continue;
+            }
+        };
+
+        if let Some(failed_dep) = manifest.depends_on.iter().find(|dep| failed_packages.contains(*dep)) {
+            let msg = format!("dependency '{failed_dep}' failed");
+            emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+            failed_packages.insert(step.package_id.clone());
+            any_failed = true;
             continue;
         }
 
@@ -104,20 +116,14 @@ pub fn run_plan(
             None,
         );
 
-        let manifest = match by_name.get(&step.package_id) {
-            Some(m) => m,
-            None => {
-                let msg = format!("unknown package {}", step.package_id);
-                emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
-                continue;
-            }
-        };
         if manifest.install.strategy != InstallStrategy::PackageManager {
             let msg = format!(
                 "unsupported strategy {:?} for {} (MVP accepts package_manager only)",
                 manifest.install.strategy, step.package_id
             );
             emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+            failed_packages.insert(step.package_id.clone());
+            any_failed = true;
             continue;
         }
         let spec = match manifest.os_provider_for_current() {
@@ -125,6 +131,8 @@ pub fn run_plan(
             None => {
                 let msg = format!("no provider for {} on this OS", step.package_id);
                 emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+                failed_packages.insert(step.package_id.clone());
+                any_failed = true;
                 continue;
             }
         };
@@ -143,34 +151,46 @@ pub fn run_plan(
                             None,
                             Some(code.0),
                         ),
-                        Ok(false) => emit(
-                            sink,
-                            store,
-                            &step.package_id,
-                            StepState::Failed,
-                            None,
-                            Some("verify command did not match expected output".to_string()),
-                            Some(code.0),
-                        ),
-                        Err(e) => emit(
-                            sink,
-                            store,
-                            &step.package_id,
-                            StepState::Failed,
-                            None,
-                            Some(e.to_string()),
-                            Some(code.0),
-                        ),
+                        Ok(false) => {
+                            emit(
+                                sink,
+                                store,
+                                &step.package_id,
+                                StepState::Failed,
+                                None,
+                                Some("verify command did not match expected output".to_string()),
+                                Some(code.0),
+                            );
+                            failed_packages.insert(step.package_id.clone());
+                            any_failed = true;
+                        }
+                        Err(e) => {
+                            emit(
+                                sink,
+                                store,
+                                &step.package_id,
+                                StepState::Failed,
+                                None,
+                                Some(e.to_string()),
+                                Some(code.0),
+                            );
+                            failed_packages.insert(step.package_id.clone());
+                            any_failed = true;
+                        }
                     },
-                    StepState::Paused => emit(
-                        sink,
-                        store,
-                        &step.package_id,
-                        StepState::Paused,
-                        Some("UAC cancelled - retry when ready".to_string()),
-                        None,
-                        Some(code.0),
-                    ),
+                    StepState::Paused => {
+                        emit(
+                            sink,
+                            store,
+                            &step.package_id,
+                            StepState::Paused,
+                            Some("UAC cancelled - retry when ready".to_string()),
+                            None,
+                            Some(code.0),
+                        );
+                        failed_packages.insert(step.package_id.clone());
+                        any_failed = true;
+                    }
                     StepState::RebootRequired => {
                         emit(
                             sink,
@@ -182,32 +202,43 @@ pub fn run_plan(
                             Some(code.0),
                         );
                         halted = true;
+                        failed_packages.insert(step.package_id.clone());
                     }
-                    _ => emit(
-                        sink,
-                        store,
-                        &step.package_id,
-                        StepState::Failed,
-                        None,
-                        Some(format!("install exited with code {}", code.0)),
-                        Some(code.0),
-                    ),
+                    _ => {
+                        emit(
+                            sink,
+                            store,
+                            &step.package_id,
+                            StepState::Failed,
+                            None,
+                            Some(format!("install exited with code {}", code.0)),
+                            Some(code.0),
+                        );
+                        failed_packages.insert(step.package_id.clone());
+                        any_failed = true;
+                    }
                 }
             }
-            Err(e) => emit(
-                sink,
-                store,
-                &step.package_id,
-                StepState::Failed,
-                None,
-                Some(e.to_string()),
-                None,
-            ),
+            Err(e) => {
+                emit(
+                    sink,
+                    store,
+                    &step.package_id,
+                    StepState::Failed,
+                    None,
+                    Some(e.to_string()),
+                    None,
+                );
+                failed_packages.insert(step.package_id.clone());
+                any_failed = true;
+            }
         }
     }
 
     if halted {
         store.set_plan_status(&plan.id, "reboot_required")?;
+    } else if any_failed {
+        store.set_plan_status(&plan.id, "failed")?;
     } else {
         store.set_plan_status(&plan.id, "completed")?;
     }
@@ -230,10 +261,21 @@ pub fn resume_plan(
     run_plan(&remaining, by_name, provider, store, sink)
 }
 
+/// Whether a nonzero provider exit should be retried automatically.
+/// `scope: machine` may elevate (UAC/reboot/installer): a user "No" or a
+/// reboot-required signal must surface after one attempt, not re-trigger
+/// the installer. `scope: user` failures are retryable (transient fetch).
+/// Interim until observed mapping lands (see ADR-011): `map_exit_code`
+/// still maps every nonzero to `Failed`; this only suppresses auto-retry.
+fn should_retry(scope: crate::manifest::InstallScope, code: i32) -> bool {
+    code != 0 && matches!(scope, crate::manifest::InstallScope::User)
+}
+
 /// Run one install, retrying nonzero exits up to three times with
-/// 1s/2s/4s backoff. `1223` (UAC cancelled) and `3010` (reboot) are
-/// terminal and never retried. If `provider.install` returns an error,
-/// that error is surfaced after the final attempt.
+/// 1s/2s/4s backoff for `scope: user`. `scope: machine` exits are
+/// single-attempt (no re-trigger of UAC/reboot installers). If
+/// `provider.install` returns an error, that error is surfaced after the
+/// final attempt.
 fn install_with_retry(
     spec: &crate::manifest::OsProvider,
     scope: crate::manifest::InstallScope,
@@ -242,27 +284,23 @@ fn install_with_retry(
     provider: &dyn Provider,
 ) -> CoreResult<ExitCode> {
     let mut last_err: Option<CoreError> = None;
-    for attempt in 0..=1 + RETRY_BACKOFF_SECS.len() {
+    for attempt in 0..=RETRY_BACKOFF_SECS.len() {
         if attempt > 0 {
             thread::sleep(Duration::from_secs(RETRY_BACKOFF_SECS[attempt - 1]));
         }
         match provider.install(spec, scope, sink, package_id) {
             Ok(code) => {
-                if code.0 == 0
-                    || code.0 == EXIT_CODE_UAC_CANCELLED
-                    || code.0 == EXIT_CODE_REBOOT_REQUIRED
-                {
+                if code.0 == 0 {
                     return Ok(code);
                 }
-                if attempt == RETRY_BACKOFF_SECS.len() {
-                    // Final attempt: surface the failure code.
+                if attempt == RETRY_BACKOFF_SECS.len() || !should_retry(scope, code.0) {
+                    // Final attempt (or machine-scope single attempt):
+                    // surface the failure code.
                     return Ok(code);
                 }
             }
             Err(e) => {
-                if attempt == RETRY_BACKOFF_SECS.len() {
-                    last_err = Some(e);
-                }
+                last_err = Some(e);
             }
         }
     }
@@ -276,17 +314,24 @@ mod tests {
     #[test]
     fn exit_code_mapping() {
         assert_eq!(map_exit_code(0), StepState::Completed);
-        assert_eq!(map_exit_code(1223), StepState::Paused);
-        assert_eq!(map_exit_code(3010), StepState::RebootRequired);
+        assert_eq!(map_exit_code(1223), StepState::Failed);
+        assert_eq!(map_exit_code(3010), StepState::Failed);
         assert_eq!(map_exit_code(1), StepState::Failed);
         assert_eq!(map_exit_code(-1), StepState::Failed);
         assert_eq!(map_exit_code(1603), StepState::Failed);
     }
 
     #[test]
-    fn uac_cancelled_and_reboot_codes_are_terminal() {
-        assert_eq!(EXIT_CODE_UAC_CANCELLED, 1223);
-        assert_eq!(EXIT_CODE_REBOOT_REQUIRED, 3010);
+    fn machine_scope_nonzero_is_single_attempt() {
+        use crate::manifest::InstallScope;
+        assert!(!should_retry(InstallScope::Machine, 1223));
+        assert!(!should_retry(InstallScope::Machine, 3010));
+        assert!(!should_retry(InstallScope::Machine, 1));
+        assert!(!should_retry(InstallScope::Machine, 0));
+        assert!(!should_retry(InstallScope::User, 0));
+        assert!(should_retry(InstallScope::User, 1223));
+        assert!(should_retry(InstallScope::User, 3010));
+        assert!(should_retry(InstallScope::User, 1));
     }
 
     #[test]
@@ -301,5 +346,147 @@ mod tests {
             CoreError::PlanNotFound(id) => assert_eq!(id, "unknown-plan-999"),
             other => panic!("expected PlanNotFound, got {other:?}"),
         }
+    }
+
+    struct AlwaysFailProvider;
+    impl Provider for AlwaysFailProvider {
+        fn kind(&self) -> crate::manifest::ProviderKind {
+            crate::manifest::ProviderKind::Winget
+        }
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn install(
+            &self,
+            _spec: &crate::manifest::OsProvider,
+            _scope: crate::manifest::InstallScope,
+            _sink: &mut dyn EventSink,
+            _package_id: &str,
+        ) -> CoreResult<ExitCode> {
+            Err(CoreError::ProcessSpawn("always fails".to_string()))
+        }
+        fn uninstall(&self, _spec: &crate::manifest::OsProvider) -> CoreResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn retry_exhaustion_does_not_panic() {
+        let spec = crate::manifest::OsProvider {
+            provider: crate::manifest::ProviderKind::Winget,
+            package: "test.pkg".to_string(),
+            version: None,
+        };
+        let mut sink = crate::events::NullSink;
+        let provider = AlwaysFailProvider;
+        let res = install_with_retry(
+            &spec,
+            crate::manifest::InstallScope::User,
+            &mut sink,
+            "test-pkg",
+            &provider,
+        );
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn dependent_step_fails_when_dependency_fails() {
+        use crate::manifest::{
+            InstallScope, InstallSpec, InstallStrategy, OsProvider, PackageManifest, SecuritySpec,
+            VerifySpec,
+        };
+        let mut by_name = HashMap::new();
+        by_name.insert(
+            "dep".to_string(),
+            PackageManifest {
+                schema_version: 1,
+                name: "dep".to_string(),
+                category: "tool".to_string(),
+                windows: Some(OsProvider {
+                    provider: crate::manifest::ProviderKind::Winget,
+                    package: "Dep".to_string(),
+                    version: None,
+                }),
+                macos: None,
+                linux: None,
+                depends_on: vec![],
+                install: InstallSpec {
+                    strategy: InstallStrategy::PackageManager,
+                    scope: InstallScope::Machine,
+                },
+                verify: VerifySpec {
+                    command: "dep".to_string(),
+                    args: vec![],
+                    expect_regex: ".*".to_string(),
+                },
+                detect: None,
+                security: SecuritySpec {
+                    allow_scripts: false,
+                    allow_elevation: true,
+                },
+            },
+        );
+        by_name.insert(
+            "child".to_string(),
+            PackageManifest {
+                schema_version: 1,
+                name: "child".to_string(),
+                category: "tool".to_string(),
+                windows: Some(OsProvider {
+                    provider: crate::manifest::ProviderKind::Winget,
+                    package: "Child".to_string(),
+                    version: None,
+                }),
+                macos: None,
+                linux: None,
+                depends_on: vec!["dep".to_string()],
+                install: InstallSpec {
+                    strategy: InstallStrategy::PackageManager,
+                    scope: InstallScope::Machine,
+                },
+                verify: VerifySpec {
+                    command: "child".to_string(),
+                    args: vec![],
+                    expect_regex: ".*".to_string(),
+                },
+                detect: None,
+                security: SecuritySpec {
+                    allow_scripts: false,
+                    allow_elevation: true,
+                },
+            },
+        );
+        let plan = InstallPlan {
+            id: "test-cascade".to_string(),
+            package_ids: vec!["dep".to_string(), "child".to_string()],
+            steps: vec![
+                crate::PlanStep {
+                    package_id: "dep".to_string(),
+                    scope: InstallScope::Machine,
+                    state: StepState::Pending,
+                },
+                crate::PlanStep {
+                    package_id: "child".to_string(),
+                    scope: InstallScope::Machine,
+                    state: StepState::Pending,
+                },
+            ],
+            uac_warnings: 2,
+        };
+        let mut store = Store::open_in_memory().expect("in-memory store");
+        let provider = AlwaysFailProvider;
+        let mut sink = crate::events::NullSink;
+        run_plan(&plan, &by_name, &provider, &mut store, &mut sink).expect("run plan");
+        let steps = store.steps_for_plan("test-cascade").expect("steps");
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].package_id, "dep");
+        assert_eq!(steps[0].state, "Failed");
+        assert_eq!(steps[1].package_id, "child");
+        assert_eq!(steps[1].state, "Failed");
+        assert!(steps[1]
+            .message
+            .as_deref()
+            .unwrap()
+            .contains("dependency 'dep' failed"));
     }
 }

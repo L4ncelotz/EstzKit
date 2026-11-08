@@ -71,6 +71,14 @@ Unit tests (run in CI on `windows-latest` or locally):
 cargo test -p estzkit-core
 ```
 
+### Windows Sandbox (optional)
+
+Requires Windows 10/11 Pro+ with Sandbox enabled. `scripts/test-sandbox.wsb` maps your clone to `C:\EstzKit` inside the Sandbox:
+
+1. Open `scripts/test-sandbox.wsb` and set `<HostFolder>` to your local clone path (shipped value `F:\EstzKit` is maintainer-local; `.wsb` does not support relative paths, edit the absolute path once per machine).
+2. Keep `<SandboxFolder>C:\EstzKit</SandboxFolder>` and `<ReadOnly>false</ReadOnly>` as-is — writable mapping is intentional so `evidence/` + `estzkit.db` write back to the host for the VM playbook.
+3. Run `wsb.exe scripts\test-sandbox.wsb`, then inside the Sandbox: `cd C:\EstzKit; powershell -ExecutionPolicy Bypass -File scripts\run-sandbox-tests.ps1`.
+
 ## Why not `winget configure`?
 
 `winget configure` applies DSC (Desired State Configuration) YAML files directly. While useful for static environments, it leaves critical developer workflow gaps:

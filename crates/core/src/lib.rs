@@ -19,7 +19,7 @@ pub mod verify;
 pub use detect::{detect_package, DetectJob, DetectResult};
 pub use error::{CoreError, CoreResult};
 pub use events::{CollectSink, EventSink, NullSink, INSTALL_STATE_CHANGED_EVENT};
-pub use executor::{map_exit_code, resume_plan, run_plan, EXIT_CODE_REBOOT_REQUIRED, EXIT_CODE_UAC_CANCELLED};
+pub use executor::{map_exit_code, resume_plan, run_plan};
 pub use manifest::{
     index_by_name, installed_names, is_valid_name, parse_package_manifest,
     parse_profile_manifest, DetectSpec, DirSource, InstallSpec, InstallStrategy, ManifestSource,
