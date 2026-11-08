@@ -63,23 +63,48 @@ impl WingetProvider {
 
     fn query_installed(winget_id: &str) -> DetectStatus {
         let output = Command::new("winget")
-            .args(["list", "--id", winget_id, "--exact"])
+            .args(["list", "--id", winget_id, "--exact", "--accept-source-agreements"])
             .output();
         let output = match output {
-            Ok(o) if o.status.success() => o,
-            _ => return DetectStatus::Missing,
+            Ok(o) => o,
+            Err(_) => return DetectStatus::Missing,
         };
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let found = stdout
-            .to_lowercase()
-            .contains(&winget_id.to_lowercase())
-            && !stdout.to_lowercase().contains("no installed package found");
-        if found {
-            DetectStatus::InstalledOk { version: None }
-        } else {
-            DetectStatus::Missing
-        }
+        parse_winget_list(&stdout, output.status.success(), winget_id)
     }
+}
+
+/// Parse `winget list --id <id> --exact` output into a [`DetectStatus`].
+///
+/// Pure and unit-testable against golden files in `tests/fixtures/`.
+/// Rules, in order (grounded by probed outputs — see `tests/fixtures/README.md`):
+/// 1. Non-zero exit → [`DetectStatus::Missing`] (probed: not-found exits 20).
+/// 2. Output contains "No installed package found" → `Missing` (defense in
+///    depth for winget builds that exit 0 on empty results).
+/// 3. A row whose tokens contain `winget_id` (case-insensitive) →
+///    [`DetectStatus::InstalledOk`] with the token after the id as version.
+/// 4. Anything else → `Missing`.
+pub fn parse_winget_list(stdout: &str, status_success: bool, winget_id: &str) -> DetectStatus {
+    if !status_success {
+        return DetectStatus::Missing;
+    }
+    let lower = stdout.to_lowercase();
+    if lower.contains("no installed package found") {
+        return DetectStatus::Missing;
+    }
+    let id_lower = winget_id.to_lowercase();
+    for line in stdout.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        let Some(pos) = tokens.iter().position(|t| t.to_lowercase() == id_lower) else {
+            continue;
+        };
+        // Row layout: Name Id Version [Available] [Source]; Name may contain
+        // spaces but never the id token itself, so the token after the id is
+        // the installed version.
+        let version = tokens.get(pos + 1).map(|v| (*v).to_string());
+        return DetectStatus::InstalledOk { version };
+    }
+    DetectStatus::Missing
 }
 
 impl Provider for WingetProvider {
@@ -262,5 +287,36 @@ mod tests {
     fn scope_spellings() {
         assert_eq!(InstallScope::User.as_str(), "user");
         assert_eq!(InstallScope::Machine.as_str(), "machine");
+    }
+
+    // Golden outputs captured read-only from the dev machine (winget
+    // v1.29.380, en-US, 2026-11-08) — see tests/fixtures/README.md.
+    const LIST_GIT_PRESENT: &str = include_str!("../tests/fixtures/winget_list_git_present.txt");
+    const LIST_MISSING: &str = include_str!("../tests/fixtures/winget_list_missing.txt");
+
+    #[test]
+    fn parses_present_row_from_golden_fixture() {
+        let status = parse_winget_list(LIST_GIT_PRESENT, true, "Git.Git");
+        assert_eq!(status, DetectStatus::InstalledOk { version: Some("2.56.0.3".to_string()) });
+    }
+
+    #[test]
+    fn parses_missing_from_golden_fixture() {
+        // Probed: not-found exits 20 on winget v1.29.380.
+        let status = parse_winget_list(LIST_MISSING, false, "__EstzKit.Nonexistent.Package__");
+        assert_eq!(status, DetectStatus::Missing);
+    }
+
+    #[test]
+    fn not_found_message_is_missing_even_with_success_status() {
+        let status = parse_winget_list(LIST_MISSING, true, "__EstzKit.Nonexistent.Package__");
+        assert_eq!(status, DetectStatus::Missing);
+    }
+
+    #[test]
+    fn id_match_is_case_insensitive_and_version_optional() {
+        let status = parse_winget_list(LIST_GIT_PRESENT, true, "git.git");
+        assert_eq!(status, DetectStatus::InstalledOk { version: Some("2.56.0.3".to_string()) });
+        assert_eq!(parse_winget_list("", true, "Git.Git"), DetectStatus::Missing);
     }
 }

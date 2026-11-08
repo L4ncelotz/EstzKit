@@ -1,0 +1,7 @@
+# command: winget list --id __EstzKit.Nonexistent.Package__ --exact --accept-source-agreements
+# exit_code: 20
+# winget_version: v1.29.380
+# locale: en-US
+# probed: 2026-11-08 (estzkit-dev machine)
+
+No installed package found matching input criteria.

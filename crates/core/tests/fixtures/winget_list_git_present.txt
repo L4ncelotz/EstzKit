@@ -1,0 +1,9 @@
+# command: winget list --id Git.Git --exact --accept-source-agreements
+# exit_code: 0
+# winget_version: v1.29.380
+# locale: en-US
+# probed: 2026-11-08 (estzkit-dev machine)
+
+Name Id      Version  Available Source
+--------------------------------------
+Git  Git.Git 2.56.0.3 2.56.0.4  winget
