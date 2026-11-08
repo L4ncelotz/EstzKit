@@ -37,6 +37,10 @@ pub enum CoreError {
     /// An I/O error occurred while reading the filesystem.
     #[error("io error: {0}")]
     Io(String),
+
+    /// A plan was not found in the store.
+    #[error("plan not found: {0}")]
+    PlanNotFound(String),
 }
 
 impl From<rusqlite::Error> for CoreError {

@@ -8,6 +8,7 @@ import type {
   Profile,
   StepEvent,
   StepState,
+  StoredStep,
 } from "./types/ipc";
 
 type StepLogs = Record<string, { state: StepState; message: string | null; error: string | null }>;
@@ -24,9 +25,10 @@ export default function App() {
   const [detected, setDetected] = useState<DetectedPackage[]>([]);
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [stepLogs, setStepLogs] = useState<StepLogs>({});
+  const [storedLogs, setStoredLogs] = useState<StoredStep[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const load = useCallback(async () => {
     setError(null);
     try {
@@ -152,12 +154,44 @@ export default function App() {
     }
   };
 
+  const runResume = async () => {
+    if (!plan) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await invoke("resume_plan", { planId: plan.id });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runRetry = async (packageId: string) => {
     if (!plan) return;
     setBusy(true);
     setError(null);
     try {
       await invoke("retry_step", { planId: plan.id, packageId });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleViewLogs = async () => {
+    if (!plan) return;
+    if (showLogs) {
+      setShowLogs(false);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const logs = await invoke<StoredStep[]>("get_plan_steps", { planId: plan.id });
+      setStoredLogs(logs);
+      setShowLogs(true);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -179,8 +213,13 @@ export default function App() {
 
       {error && <div className="banner paused">{error}</div>}
       {hasReboot && (
-        <div className="banner reboot">
-          Reboot required — please restart your computer and re-run EstzKit.
+        <div className="banner reboot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Reboot required — please restart your computer and re-run EstzKit.</span>
+          {plan && (
+            <button type="button" disabled={busy} onClick={runResume}>
+              Resume from stored state
+            </button>
+          )}
         </div>
       )}
 
@@ -290,7 +329,14 @@ export default function App() {
       </section>
 
       <section className="card">
-        <h2>Install progress</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h2>Install progress</h2>
+          {plan && (
+            <button type="button" disabled={busy} onClick={toggleViewLogs}>
+              {showLogs ? "Hide Logs" : "View Logs"}
+            </button>
+          )}
+        </div>
         {plan && plan.steps.length === 0 && <p className="muted">No steps.</p>}
         {plan && (
           <table>
@@ -333,6 +379,41 @@ export default function App() {
         {pausedIds.length > 0 && (
           <div className="banner paused" style={{ marginTop: "0.75rem" }}>
             Paused: {pausedIds.join(", ")} — UAC cancelled - retry when ready
+          </div>
+        )}
+        {showLogs && (
+          <div className="logs-panel" style={{ marginTop: "1rem" }}>
+            <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>
+              Persisted Store Logs (Plan {plan?.id})
+            </h3>
+            {storedLogs.length === 0 ? (
+              <p className="muted">No persisted steps found in store.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Package</th>
+                    <th>State</th>
+                    <th>Exit code</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {storedLogs.map((entry, idx) => (
+                    <tr key={`${entry.packageId}-${idx}`}>
+                      <td>{entry.packageId}</td>
+                      <td>
+                        <span className={`badge ${badgeClass(entry.state as StepState)}`}>
+                          {entry.state}
+                        </span>
+                      </td>
+                      <td>{entry.exitCode !== null ? entry.exitCode : "—"}</td>
+                      <td>{entry.message ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
         {!plan && <p className="muted">Run Preview plan, then Execute plan.</p>}

@@ -3,7 +3,9 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -61,3 +63,74 @@ jobs:
 
       - name: build frontend
         run: corepack pnpm run build
+
+  installer:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: pnpm install
+        run: corepack pnpm install --frozen-lockfile
+      - name: Build Tauri installer
+        run: corepack pnpm exec tauri build --target x86_64-pc-windows-msvc
+      - name: Upload installer bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: estzkit-installer
+          path: |
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+
+  e2e:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: cargo build
+        run: cargo build -p estzkit-core -p estzkit-cli --locked
+      - name: Real install on disposable runner
+        run: |
+          cargo run -p estzkit-cli -- install git node
+      - name: Verify installed tools via CLI detect
+        shell: pwsh
+        run: |
+          cargo run -p estzkit-cli -- detect | Out-File -FilePath detect-output.txt -Encoding utf8
+          Get-Content detect-output.txt
+          $content = Get-Content detect-output.txt -Raw
+          if (-not ($content -match "(?m)^git\s+true")) {
+            throw "Expected git to be detected as true"
+          }
+          if (-not ($content -match "(?m)^node\s+true")) {
+            throw "Expected node to be detected as true"
+          }
+          "install_exit=0" | Out-File -FilePath exit-codes.txt -Encoding utf8
+          "detect_exit=0" | Out-File -FilePath exit-codes.txt -Append -Encoding utf8
+      - name: Upload E2E evidence artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidence
+          path: |
+            detect-output.txt
+            exit-codes.txt

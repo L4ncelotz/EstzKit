@@ -1,6 +1,8 @@
 //! SQLite persistence for plans, steps, and detection results.
 
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::error::{CoreError, CoreResult};
 use crate::{DetectedPackage, InstallPlan, StepState};
@@ -102,8 +104,41 @@ impl Store {
             Ok(None)
         }
     }
+    /// Read back all recorded steps for a plan in insertion order.
+    pub fn steps_for_plan(&self, plan_id: &str) -> CoreResult<Vec<StoredStep>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT package_id, state, exit_code, message FROM steps WHERE plan_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map(params![plan_id], |row| {
+            Ok(StoredStep {
+                package_id: row.get(0)?,
+                state: row.get(1)?,
+                exit_code: row.get(2)?,
+                message: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
 }
 
+/// A step's persisted state retrieved from the store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredStep {
+    /// Package identifier.
+    pub package_id: String,
+    /// Step lifecycle state name (e.g. "Pending", "Completed", "Failed").
+    pub state: String,
+    /// Process exit code if completed/failed.
+    pub exit_code: Option<i32>,
+    /// Progress or error message.
+    pub message: Option<String>,
+}
 /// Wrap a rusqlite error into a store error (kept for callers that bind it).
 pub fn store_err(e: rusqlite::Error) -> CoreError {
     CoreError::Store(e.to_string())
@@ -126,6 +161,7 @@ mod tests {
                 depends_on: vec![],
                 scope: InstallScope::User,
                 state: StepState::Pending,
+                message: None,
             }],
             uac_warnings: 0,
         };
@@ -152,5 +188,25 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM detected_packages", [], |r| r.get(0))
             .expect("count");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn steps_for_plan_preserves_order_and_content() {
+        let mut store = Store::open_in_memory().expect("in-memory store");
+        store
+            .record_step("p1", "first", StepState::Pending, None, None)
+            .expect("record first");
+        store
+            .record_step("p1", "second", StepState::Completed, Some(0), Some("installed ok"))
+            .expect("record second");
+        let steps = store.steps_for_plan("p1").expect("read steps");
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].package_id, "first");
+        assert_eq!(steps[0].state, "Pending");
+        assert_eq!(steps[0].exit_code, None);
+        assert_eq!(steps[1].package_id, "second");
+        assert_eq!(steps[1].state, "Completed");
+        assert_eq!(steps[1].exit_code, Some(0));
+        assert_eq!(steps[1].message.as_deref(), Some("installed ok"));
     }
 }

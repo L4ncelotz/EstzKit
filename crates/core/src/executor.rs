@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::error::{CoreError, CoreResult};
 use crate::events::EventSink;
 use crate::manifest::{InstallStrategy, PackageManifest};
+use crate::planner::remaining_plan_from_steps;
 use crate::provider::{ExitCode, Provider};
 use crate::store::Store;
 use crate::verify::run_verify;
@@ -213,6 +214,22 @@ pub fn run_plan(
     Ok(())
 }
 
+/// Resume an existing plan: load persisted steps from `store`, build an
+/// [`InstallPlan`] containing only the remaining non-completed steps, and
+/// run them.
+pub fn resume_plan(
+    plan_id: &str,
+    by_name: &HashMap<String, PackageManifest>,
+    provider: &dyn Provider,
+    store: &mut Store,
+    sink: &mut dyn EventSink,
+) -> CoreResult<()> {
+    let steps = store.steps_for_plan(plan_id)?;
+    let remaining = remaining_plan_from_steps(&steps, plan_id)
+        .ok_or_else(|| CoreError::PlanNotFound(plan_id.to_string()))?;
+    run_plan(&remaining, by_name, provider, store, sink)
+}
+
 /// Run one install, retrying nonzero exits up to three times with
 /// 1s/2s/4s backoff. `1223` (UAC cancelled) and `3010` (reboot) are
 /// terminal and never retried. If `provider.install` returns an error,
@@ -270,5 +287,19 @@ mod tests {
     fn uac_cancelled_and_reboot_codes_are_terminal() {
         assert_eq!(EXIT_CODE_UAC_CANCELLED, 1223);
         assert_eq!(EXIT_CODE_REBOOT_REQUIRED, 3010);
+    }
+
+    #[test]
+    fn resume_plan_unknown_plan_returns_not_found() {
+        let mut store = Store::open_in_memory().expect("in-memory store");
+        let by_name = HashMap::new();
+        let provider = crate::provider::WingetProvider::new();
+        let mut sink = crate::events::NullSink;
+        let err = resume_plan("unknown-plan-999", &by_name, &provider, &mut store, &mut sink)
+            .expect_err("unknown plan should error");
+        match err {
+            CoreError::PlanNotFound(id) => assert_eq!(id, "unknown-plan-999"),
+            other => panic!("expected PlanNotFound, got {other:?}"),
+        }
     }
 }

@@ -1,0 +1,18 @@
+schema_version: 1
+name: gh
+category: tools
+windows:
+  provider: winget
+  package: GitHub.cli
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: gh
+  args: ["--version"]
+  expect_regex: "^gh version"
+security:
+  allow_scripts: false
+  allow_elevation: true

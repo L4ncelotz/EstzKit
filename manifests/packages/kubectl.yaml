@@ -1,0 +1,18 @@
+schema_version: 1
+name: kubectl
+category: devops
+windows:
+  provider: winget
+  package: Kubernetes.kubectl
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: kubectl
+  args: ["version", "--client=true"]
+  expect_regex: "v\\d+\\.\\d+"
+security:
+  allow_scripts: false
+  allow_elevation: true

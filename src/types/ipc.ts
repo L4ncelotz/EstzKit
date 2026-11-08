@@ -27,6 +27,7 @@ export interface PlanStep {
   dependsOn: string[];
   scope: InstallScope;
   state: StepState;
+  message: string | null;
 }
 
 export type StepState =
@@ -54,6 +55,13 @@ export interface StepEvent {
   state: StepState;
   message: string | null;
   error: string | null;
+}
+
+export interface StoredStep {
+  packageId: string;
+  state: string;
+  exitCode: number | null;
+  message: string | null;
 }
 
 export type DetectStatus =

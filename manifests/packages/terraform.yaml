@@ -1,0 +1,18 @@
+schema_version: 1
+name: terraform
+category: devops
+windows:
+  provider: winget
+  package: Hashicorp.Terraform
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: terraform
+  args: ["version"]
+  expect_regex: "Terraform v\\d+"
+security:
+  allow_scripts: false
+  allow_elevation: true

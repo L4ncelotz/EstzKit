@@ -11,9 +11,9 @@ use std::sync::Mutex;
 use estzkit_core::manifest::{BundledSource, DirSource, ManifestSource, PackageManifest};
 use estzkit_core::provider::{provider_for, WingetProvider};
 use estzkit_core::{
-    build_plan, detect_package, index_by_name, installed_names, resolve, run_plan,
+    build_plan, detect_package, index_by_name, installed_names, resolve, resume_plan as core_resume_plan, run_plan,
     DetectedPackage, EventSink, InstallPlan, PackageSummary, Profile, ProviderKind, StepEvent,
-    StepState, Store,
+    StepState, Store, StoredStep,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -153,6 +153,22 @@ pub fn execute_plan(
     run_plan(&plan, &by_name, provider.as_ref(), &mut store, &mut sink).map_err(|e| e.to_string())
 }
 
+/// Resume a previously halted plan (e.g. after a reboot).
+#[tauri::command]
+pub fn resume_plan(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<(), String> {
+    let manifests = state.packages()?;
+    let by_name = index_by_name(&manifests);
+    let provider = provider_for(ProviderKind::Winget);
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    let mut sink = TauriEventSink { app };
+    core_resume_plan(&plan_id, &by_name, provider.as_ref(), &mut store, &mut sink)
+        .map_err(|e| e.to_string())
+}
+
 /// Request cancellation of a plan. The executor records the request; a
 /// running plan checks it between steps in the future v2 (MVP: recorded).
 #[tauri::command]
@@ -163,6 +179,16 @@ pub fn cancel_plan(state: State<'_, AppState>, plan_id: String) -> Result<(), St
         .map_err(|e| e.to_string())?
         .insert(plan_id);
     Ok(())
+}
+
+/// Query stored steps for a plan (ordered by execution sequence).
+#[tauri::command]
+pub fn get_plan_steps(
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<Vec<StoredStep>, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    store.steps_for_plan(&plan_id).map_err(|e| e.to_string())
 }
 
 /// Retry a single failed/paused step: reinstall just that package.
@@ -237,7 +263,9 @@ pub fn run() {
             plan_install,
             execute_plan,
             cancel_plan,
-            retry_step
+            retry_step,
+            get_plan_steps,
+            resume_plan
         ])
         .run(tauri::generate_context!())
         .expect("error while running EstzKit");

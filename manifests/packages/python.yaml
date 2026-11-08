@@ -1,0 +1,18 @@
+schema_version: 1
+name: python
+category: runtime
+windows:
+  provider: winget
+  package: Python.Python.3.13
+  version: null
+depends_on: []
+install:
+  strategy: package_manager
+  scope: user
+verify:
+  command: python
+  args: ["--version"]
+  expect_regex: "^Python \\d+\\.\\d+\\.\\d+"
+security:
+  allow_scripts: false
+  allow_elevation: true

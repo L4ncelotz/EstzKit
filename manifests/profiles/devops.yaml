@@ -1,0 +1,4 @@
+schema_version: 1
+name: devops
+display_name: DevOps Engineer
+packages: [git, docker, kubectl, terraform, awscli, redis, postgresql]

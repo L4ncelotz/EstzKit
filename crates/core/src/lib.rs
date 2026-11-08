@@ -19,17 +19,17 @@ pub mod verify;
 pub use detect::{detect_package, DetectJob, DetectResult};
 pub use error::{CoreError, CoreResult};
 pub use events::{CollectSink, EventSink, NullSink, INSTALL_STATE_CHANGED_EVENT};
-pub use executor::{map_exit_code, run_plan, EXIT_CODE_REBOOT_REQUIRED, EXIT_CODE_UAC_CANCELLED};
+pub use executor::{map_exit_code, resume_plan, run_plan, EXIT_CODE_REBOOT_REQUIRED, EXIT_CODE_UAC_CANCELLED};
 pub use manifest::{
     index_by_name, installed_names, is_valid_name, parse_package_manifest,
     parse_profile_manifest, DetectSpec, DirSource, InstallSpec, InstallStrategy, ManifestSource,
     OsProvider, PackageManifest, ProfileManifest, ProviderKind, SecuritySpec, VerifySpec,
     BundledSource, MANIFESTS_ENV_VAR, SCHEMA_VERSION,
 };
-pub use planner::build_plan;
+pub use planner::{build_plan, remaining_plan_from_steps};
 pub use provider::{provider_for, AptProvider, BrewProvider, ExitCode, Provider, WingetProvider};
 pub use resolver::resolve;
-pub use store::{Store, STORE_SCHEMA_VERSION};
+pub use store::{Store, StoredStep, STORE_SCHEMA_VERSION};
 pub use verify::{output_matches, run_combined, run_verify};
 
 use serde::{Deserialize, Serialize};
@@ -104,6 +104,9 @@ pub struct PlanStep {
     pub scope: manifest::InstallScope,
     /// Initial step state (`Pending`, or `Skipped` when already installed).
     pub state: StepState,
+    /// Optional status or skip reason message.
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// Lifecycle state of one plan step.

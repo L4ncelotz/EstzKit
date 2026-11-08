@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::manifest::PackageManifest;
+use crate::store::StoredStep;
 use crate::{InstallPlan, PlanStep, StepState};
 
 /// Build an install plan from resolved (dependency-ordered) manifests.
@@ -28,6 +29,11 @@ pub fn build_plan(ordered: &[PackageManifest], already: &HashSet<String>) -> Ins
             } else {
                 StepState::Pending
             },
+            message: if skipped {
+                Some("already installed (installed_ok) — not reinstalled".to_string())
+            } else {
+                None
+            },
         });
     }
     InstallPlan {
@@ -48,6 +54,51 @@ fn new_plan_id() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("plan-{nanos:x}")
+}
+
+/// Reconstruct an [`InstallPlan`] containing only the remaining non-completed
+/// steps from a persisted plan's steps.
+///
+/// Steps in state `Pending`, `Failed`, `Paused`, or `RebootRequired` are kept
+/// in their original order. `Completed` and `Skipped` steps are excluded.
+/// Returns `None` if `steps` is empty or no steps need execution.
+pub fn remaining_plan_from_steps(steps: &[StoredStep], plan_id: &str) -> Option<InstallPlan> {
+    if steps.is_empty() {
+        return None;
+    }
+    let mut remaining = Vec::new();
+    let mut package_ids = Vec::new();
+    for s in steps {
+        let is_remaining = matches!(
+            s.state.as_str(),
+            "Pending" | "Failed" | "Paused" | "RebootRequired"
+        );
+        if is_remaining {
+            package_ids.push(s.package_id.clone());
+            remaining.push(PlanStep {
+                package_id: s.package_id.clone(),
+                depends_on: Vec::new(),
+                scope: crate::manifest::InstallScope::User,
+                state: match s.state.as_str() {
+                    "Failed" => StepState::Failed,
+                    "Paused" => StepState::Paused,
+                    "RebootRequired" => StepState::RebootRequired,
+                    _ => StepState::Pending,
+                },
+                message: s.message.clone(),
+            });
+        }
+    }
+    if remaining.is_empty() {
+        None
+    } else {
+        Some(InstallPlan {
+            id: plan_id.to_string(),
+            package_ids,
+            steps: remaining,
+            uac_warnings: 0,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -96,6 +147,13 @@ mod tests {
             .collect();
         assert_eq!(skipped, vec!["c"]);
         assert!(plan.steps.iter().all(|s| s.state != StepState::Skipped || s.package_id == "c"));
+        let step_c = plan.steps.iter().find(|s| s.package_id == "c").unwrap();
+        assert_eq!(
+            step_c.message.as_deref(),
+            Some("already installed (installed_ok) — not reinstalled")
+        );
+        let step_a = plan.steps.iter().find(|s| s.package_id == "a").unwrap();
+        assert_eq!(step_a.message, None);
     }
 
     #[test]
@@ -103,5 +161,53 @@ mod tests {
         let plan = build_plan(&[], &HashSet::new());
         assert_eq!(plan.uac_warnings, 0);
         assert!(plan.steps.is_empty());
+    }
+
+    #[test]
+    fn remaining_plan_filters_completed_and_skipped() {
+        let fixture = vec![
+            StoredStep {
+                package_id: "a".to_string(),
+                state: "Completed".to_string(),
+                exit_code: Some(0),
+                message: Some("ok".to_string()),
+            },
+            StoredStep {
+                package_id: "b".to_string(),
+                state: "Failed".to_string(),
+                exit_code: Some(1),
+                message: Some("err".to_string()),
+            },
+            StoredStep {
+                package_id: "c".to_string(),
+                state: "RebootRequired".to_string(),
+                exit_code: Some(3010),
+                message: Some("reboot".to_string()),
+            },
+            StoredStep {
+                package_id: "d".to_string(),
+                state: "Skipped".to_string(),
+                exit_code: None,
+                message: Some("skip".to_string()),
+            },
+        ];
+        let plan = remaining_plan_from_steps(&fixture, "p-123").expect("remaining plan");
+        assert_eq!(plan.id, "p-123");
+        assert_eq!(plan.package_ids, vec!["b", "c"]);
+        assert_eq!(plan.steps.len(), 2);
+        assert_eq!(plan.steps[0].package_id, "b");
+        assert_eq!(plan.steps[0].state, StepState::Failed);
+        assert_eq!(plan.steps[1].package_id, "c");
+        assert_eq!(plan.steps[1].state, StepState::RebootRequired);
+        assert_eq!(plan.uac_warnings, 0);
+
+        assert!(remaining_plan_from_steps(&[], "p-123").is_none());
+        let all_done = vec![StoredStep {
+            package_id: "a".to_string(),
+            state: "Completed".to_string(),
+            exit_code: Some(0),
+            message: None,
+        }];
+        assert!(remaining_plan_from_steps(&all_done, "p-123").is_none());
     }
 }
