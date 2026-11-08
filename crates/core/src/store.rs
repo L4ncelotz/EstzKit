@@ -112,7 +112,8 @@ pub fn store_err(e: rusqlite::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{InstallScope, PlanStep};
+    use crate::PlanStep;
+    use crate::manifest::InstallScope;
 
     #[test]
     fn persists_plan_and_steps() {
