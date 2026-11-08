@@ -100,15 +100,15 @@ pub fn refresh_path() {
     use winreg::RegKey;
 
     let mut parts: Vec<String> = Vec::new();
-    if let Ok(hklm) = RegKey::from_root(HKEY_LOCAL_MACHINE)
+    if let Ok(hklm) = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey(r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
     {
-        if let Ok(p) = hklm.get_value::<_, String>("Path") {
+        if let Ok(p) = hklm.get_value::<String, _>("Path") {
             parts.push(p);
         }
     }
-    if let Ok(hkcu) = RegKey::from_root(HKEY_CURRENT_USER).open_subkey("Environment") {
-        if let Ok(p) = hkcu.get_value::<_, String>("Path") {
+    if let Ok(hkcu) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Environment") {
+        if let Ok(p) = hkcu.get_value::<String, _>("Path") {
             parts.push(p);
         }
     }
@@ -134,24 +134,15 @@ pub fn registry_installed(name: &str) -> bool {
         r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
     ];
     let roots: [(RegKey, &str); 3] = [
-        (
-            RegKey::from_root(HKEY_LOCAL_MACHINE),
-            UNINSTALL_PATHS[0],
-        ),
-        (
-            RegKey::from_root(HKEY_LOCAL_MACHINE),
-            UNINSTALL_PATHS[2],
-        ),
-        (
-            RegKey::from_root(HKEY_CURRENT_USER),
-            UNINSTALL_PATHS[1],
-        ),
+        (RegKey::predef(HKEY_LOCAL_MACHINE), UNINSTALL_PATHS[0]),
+        (RegKey::predef(HKEY_LOCAL_MACHINE), UNINSTALL_PATHS[2]),
+        (RegKey::predef(HKEY_CURRENT_USER), UNINSTALL_PATHS[1]),
     ];
     for (root, path) in roots {
         if let Ok(opened) = root.open_subkey(path) {
             for key in opened.enum_keys().flatten() {
                 if let Ok(entry) = opened.open_subkey(&key) {
-                    if let Ok(display) = entry.get_value::<_, String>("DisplayName") {
+                    if let Ok(display) = entry.get_value::<String, _>("DisplayName") {
                         if display.to_lowercase().contains(&name.to_lowercase()) {
                             return true;
                         }

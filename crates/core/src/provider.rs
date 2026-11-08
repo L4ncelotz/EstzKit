@@ -249,8 +249,8 @@ impl Provider for AptProvider {
 pub fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
     match kind {
         ProviderKind::Winget => Box::new(WingetProvider::new()),
-        ProviderKind::Brew => Box::new(BrewProvider::new()),
-        ProviderKind::Apt => Box::new(AptProvider::new()),
+        ProviderKind::Brew => Box::new(BrewProvider),
+        ProviderKind::Apt => Box::new(AptProvider),
     }
 }
 
