@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/target/
+
+# Node / pnpm
+node_modules/
+dist/
+*.local
+.pnpm-store/
+
+# Tauri
+src-tauri/gen/
+
+# OS / editors
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Local state (app data must never be committed)
+*.db
+*.db-wal
+*.db-shm
