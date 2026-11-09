@@ -12,7 +12,7 @@ use estzkit_core::manifest::{BundledSource, DirSource, ManifestSource, PackageMa
 use estzkit_core::provider::{provider_for, WingetProvider};
 use estzkit_core::{
     build_plan, detect_package, index_by_name, installed_names, resolve, resume_plan as core_resume_plan, run_plan,
-    DetectedPackage, EventSink, InstallPlan, PackageSummary, Profile, ProviderKind, StepEvent,
+    run_plan_cancellable, DetectedPackage, EventSink, InstallPlan, PackageSummary, Profile, ProviderKind, StepEvent,
     StepState, Store, StoredStep,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -35,9 +35,7 @@ impl AppState {
             Some(dir) => Box::new(dir),
             None => Box::new(BundledSource),
         };
-        let store_path =
-            std::env::var("ESTZKIT_STORE").unwrap_or_else(|_| "estzkit.db".to_string());
-        let store = Store::open(&store_path).expect("open estzkit store");
+        let store = Store::open_default().expect("open estzkit store");
         AppState {
             source,
             store: Mutex::new(store),
@@ -150,7 +148,15 @@ fn execute_plan(
             return Err(format!("unknown package: {name}"));
         }
     }
-    run_plan(&plan, &by_name, provider.as_ref(), &mut store, &mut sink).map_err(|e| e.to_string())
+    let plan_id = plan.id.clone();
+    run_plan_cancellable(&plan, &by_name, provider.as_ref(), &mut store, &mut sink, &|| {
+        state
+            .cancelled
+            .lock()
+            .map(|c| c.contains(&plan_id))
+            .unwrap_or(false)
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// Resume a previously halted plan (e.g. after a reboot).

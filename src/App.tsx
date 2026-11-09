@@ -28,6 +28,8 @@ export default function App() {
   const [storedLogs, setStoredLogs] = useState<StoredStep[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     setError(null);
@@ -130,6 +132,8 @@ export default function App() {
 
   const runExecute = async () => {
     if (!plan) return;
+    setExecuting(true);
+    setCancelling(false);
     setBusy(true);
     setError(null);
     try {
@@ -137,20 +141,25 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     } finally {
+      setExecuting(false);
+      setCancelling(false);
       setBusy(false);
     }
   };
 
   const runCancel = async () => {
     if (!plan) return;
-    setBusy(true);
+    if (!executing) {
+      setPlan(null);
+      return;
+    }
+    setCancelling(true);
     setError(null);
     try {
       await invoke("cancel_plan", { planId: plan.id });
     } catch (e) {
       setError(String(e));
-    } finally {
-      setBusy(false);
+      setCancelling(false);
     }
   };
 
@@ -292,11 +301,11 @@ export default function App() {
           <button type="button" disabled={busy || selected.size === 0} onClick={runPlan}>
             Preview plan
           </button>
-          <button type="button" className="primary" disabled={busy || !plan} onClick={runExecute}>
+          <button type="button" className="primary" disabled={busy || !plan || executing} onClick={runExecute}>
             Execute plan
           </button>
-          <button type="button" disabled={busy || !plan} onClick={runCancel}>
-            Cancel plan
+          <button type="button" disabled={!plan || cancelling} onClick={runCancel}>
+            {cancelling ? "Cancelling..." : executing ? "Stop execution" : "Cancel plan"}
           </button>
         </div>
         {plan && (

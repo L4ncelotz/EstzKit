@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use estzkit_core::manifest::{DirSource, ManifestSource};
+use estzkit_core::manifest::{BundledSource, DirSource, ManifestSource};
 use estzkit_core::provider::{provider_for, WingetProvider};
 use estzkit_core::{
     build_plan, detect_package, resolve, resume_plan, run_plan, CoreError, CoreResult, EventSink,
@@ -43,12 +43,17 @@ fn run() -> CoreResult<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (manifest_dir, command) = parse_args(&args);
 
-    let dir = DirSource::resolve_dir(manifest_dir.as_deref());
-    let source = DirSource::new(dir);
+    let source: Box<dyn ManifestSource> = if let Some(dir) = manifest_dir {
+        Box::new(DirSource::new(dir))
+    } else if let Some(source) = DirSource::from_env() {
+        Box::new(source)
+    } else {
+        Box::new(BundledSource)
+    };
     let packages = source.packages()?;
     match command.as_str() {
         "packages" => print_packages(&packages),
-        "profiles" => print_profiles(&source)?,
+        "profiles" => print_profiles(source.as_ref())?,
         "detect" => detect_all(&packages),
         "plan" => {
             let names: Vec<String> = args
@@ -126,7 +131,7 @@ fn print_packages(packages: &[PackageManifest]) {
     println!("{} packages", packages.len());
 }
 
-fn print_profiles(source: &DirSource) -> CoreResult<()> {
+fn print_profiles(source: &dyn ManifestSource) -> CoreResult<()> {
     let profiles = source.profiles()?;
     println!("{:<24} {}", "PROFILE", "PACKAGES");
     for profile in &profiles {
@@ -193,8 +198,7 @@ fn install(packages: &[PackageManifest], names: &[String]) -> CoreResult<()> {
     println!("plan {}: {} steps, {} uac_warnings", plan.id, plan.steps.len(), plan.uac_warnings);
 
     let provider = provider_for(ProviderKind::Winget);
-    let store_path = std::env::var("ESTZKIT_STORE").unwrap_or_else(|_| "estzkit.db".to_string());
-    let mut store = Store::open(&store_path)?;
+    let mut store = Store::open_default()?;
     let mut sink = StdoutSink;
     run_plan(&plan, &by_name, provider.as_ref(), &mut store, &mut sink)?;
     let steps = store.steps_for_plan(&plan.id)?;
@@ -207,8 +211,7 @@ fn install(packages: &[PackageManifest], names: &[String]) -> CoreResult<()> {
 fn resume(packages: &[PackageManifest], plan_id: &str) -> CoreResult<()> {
     let by_name = estzkit_core::index_by_name(packages);
     let provider = provider_for(ProviderKind::Winget);
-    let store_path = std::env::var("ESTZKIT_STORE").unwrap_or_else(|_| "estzkit.db".to_string());
-    let mut store = Store::open(&store_path)?;
+    let mut store = Store::open_default()?;
     let mut sink = StdoutSink;
     println!("resuming plan {plan_id}");
     resume_plan(plan_id, &by_name, provider.as_ref(), &mut store, &mut sink)?;

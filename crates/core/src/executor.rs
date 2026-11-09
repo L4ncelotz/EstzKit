@@ -39,6 +39,18 @@ pub fn run_plan(
     store: &mut Store,
     sink: &mut dyn EventSink,
 ) -> CoreResult<()> {
+    run_plan_cancellable(plan, by_name, provider, store, sink, &|| false)
+}
+
+/// Execute a plan with an external cancellation probe checked before each step.
+pub fn run_plan_cancellable(
+    plan: &InstallPlan,
+    by_name: &HashMap<String, PackageManifest>,
+    provider: &dyn Provider,
+    store: &mut Store,
+    sink: &mut dyn EventSink,
+    is_cancelled: &dyn Fn() -> bool,
+) -> CoreResult<()> {
     store.create_plan(plan)?;
 
     let emit = |sink: &mut dyn EventSink,
@@ -47,7 +59,7 @@ pub fn run_plan(
                 state: StepState,
                 message: Option<String>,
                 error: Option<String>,
-                exit_code: Option<i32>| {
+                exit_code: Option<i32>| -> CoreResult<()> {
         sink.emit(StepEvent {
             plan_id: plan.id.clone(),
             package_id: package_id.to_string(),
@@ -56,15 +68,21 @@ pub fn run_plan(
             error: error.clone(),
         });
         let detail = message.as_deref().or(error.as_deref());
-        let _ = store.record_step(&plan.id, package_id, state, exit_code, detail);
+        store.record_step(&plan.id, package_id, state, exit_code, detail)?;
+        Ok(())
     };
 
     let mut halted = false;
+    let mut cancelled = false;
     let mut failed_packages = HashSet::new();
     let mut any_failed = false;
     for step in &plan.steps {
         if halted {
             continue;
+        }
+        if is_cancelled() {
+            cancelled = true;
+            break;
         }
         if step.state == StepState::Skipped {
             emit(
@@ -75,7 +93,7 @@ pub fn run_plan(
                 Some("already installed".to_string()),
                 None,
                 None,
-            );
+            )?;
             continue;
         }
 
@@ -83,7 +101,7 @@ pub fn run_plan(
             Some(m) => m,
             None => {
                 let msg = format!("unknown package {}", step.package_id);
-                emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+                emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None)?;
                 failed_packages.insert(step.package_id.clone());
                 any_failed = true;
                 continue;
@@ -92,7 +110,7 @@ pub fn run_plan(
 
         if let Some(failed_dep) = manifest.depends_on.iter().find(|dep| failed_packages.contains(*dep)) {
             let msg = format!("dependency '{failed_dep}' failed");
-            emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+            emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None)?;
             failed_packages.insert(step.package_id.clone());
             any_failed = true;
             continue;
@@ -106,7 +124,7 @@ pub fn run_plan(
             None,
             None,
             None,
-        );
+        )?;
         emit(
             sink,
             store,
@@ -115,14 +133,14 @@ pub fn run_plan(
             None,
             None,
             None,
-        );
+        )?;
 
         if manifest.install.strategy != InstallStrategy::PackageManager {
             let msg = format!(
                 "unsupported strategy {:?} for {} (MVP accepts package_manager only)",
                 manifest.install.strategy, step.package_id
             );
-            emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+            emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None)?;
             failed_packages.insert(step.package_id.clone());
             any_failed = true;
             continue;
@@ -131,7 +149,7 @@ pub fn run_plan(
             Some(s) => s,
             None => {
                 let msg = format!("no provider for {} on this OS", step.package_id);
-                emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None);
+                emit(sink, store, &step.package_id, StepState::Failed, None, Some(msg), None)?;
                 failed_packages.insert(step.package_id.clone());
                 any_failed = true;
                 continue;
@@ -151,7 +169,7 @@ pub fn run_plan(
                             Some("installed and verified".to_string()),
                             None,
                             Some(code.0),
-                        ),
+                        )?,
                         Ok(false) => {
                             emit(
                                 sink,
@@ -161,7 +179,7 @@ pub fn run_plan(
                                 None,
                                 Some("verify command did not match expected output".to_string()),
                                 Some(code.0),
-                            );
+                            )?;
                             failed_packages.insert(step.package_id.clone());
                             any_failed = true;
                         }
@@ -174,7 +192,7 @@ pub fn run_plan(
                                 None,
                                 Some(e.to_string()),
                                 Some(code.0),
-                            );
+                            )?;
                             failed_packages.insert(step.package_id.clone());
                             any_failed = true;
                         }
@@ -188,7 +206,7 @@ pub fn run_plan(
                             Some("UAC cancelled - retry when ready".to_string()),
                             None,
                             Some(code.0),
-                        );
+                        )?;
                         failed_packages.insert(step.package_id.clone());
                         any_failed = true;
                     }
@@ -201,7 +219,7 @@ pub fn run_plan(
                             Some("reboot required after install".to_string()),
                             None,
                             Some(code.0),
-                        );
+                        )?;
                         halted = true;
                         failed_packages.insert(step.package_id.clone());
                     }
@@ -214,7 +232,7 @@ pub fn run_plan(
                             None,
                             Some(format!("install exited with code {}", code.0)),
                             Some(code.0),
-                        );
+                        )?;
                         failed_packages.insert(step.package_id.clone());
                         any_failed = true;
                     }
@@ -229,14 +247,17 @@ pub fn run_plan(
                     None,
                     Some(e.to_string()),
                     None,
-                );
+                )?;
                 failed_packages.insert(step.package_id.clone());
                 any_failed = true;
             }
         }
     }
 
-    if halted {
+    if cancelled {
+        store.set_plan_status(&plan.id, "cancelled")?;
+        return Err(CoreError::PlanFailed(format!("plan {} cancelled by user", plan.id)));
+    } else if halted {
         store.set_plan_status(&plan.id, "reboot_required")?;
     } else if any_failed {
         store.set_plan_status(&plan.id, "failed")?;
@@ -493,5 +514,64 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("dependency 'dep' failed"));
+    }
+
+    #[test]
+    fn cancellation_stops_execution() {
+        use crate::manifest::{
+            InstallScope, InstallSpec, InstallStrategy, OsProvider, PackageManifest, SecuritySpec,
+            VerifySpec,
+        };
+        let mut by_name = HashMap::new();
+        by_name.insert(
+            "pkg1".to_string(),
+            PackageManifest {
+                schema_version: 1,
+                name: "pkg1".to_string(),
+                category: "tool".to_string(),
+                windows: Some(OsProvider {
+                    provider: crate::manifest::ProviderKind::Winget,
+                    package: "Pkg1".to_string(),
+                    version: None,
+                }),
+                macos: None,
+                linux: None,
+                depends_on: vec![],
+                install: InstallSpec {
+                    strategy: InstallStrategy::PackageManager,
+                    scope: InstallScope::User,
+                },
+                verify: VerifySpec {
+                    command: "pkg1".to_string(),
+                    args: vec![],
+                    expect_regex: None,
+                },
+                detect: None,
+                security: SecuritySpec {
+                    allow_scripts: false,
+                    allow_elevation: false,
+                },
+            },
+        );
+        let plan = InstallPlan {
+            id: "test-cancel".to_string(),
+            package_ids: vec!["pkg1".to_string()],
+            steps: vec![crate::PlanStep {
+                package_id: "pkg1".to_string(),
+                depends_on: vec![],
+                scope: InstallScope::User,
+                state: StepState::Pending,
+                message: None,
+            }],
+            uac_warnings: 0,
+        };
+        let mut store = Store::open_in_memory().expect("in-memory store");
+        let provider = AlwaysFailProvider;
+        let mut sink = crate::events::NullSink;
+        let res = run_plan_cancellable(&plan, &by_name, &provider, &mut store, &mut sink, &|| true);
+        assert!(res.is_err());
+        let mut stmt = store.conn.prepare("SELECT status FROM plans WHERE id = ?1").expect("prep");
+        let status: String = stmt.query_row(rusqlite::params!["test-cancel"], |r| r.get(0)).expect("status");
+        assert_eq!(status, "cancelled");
     }
 }

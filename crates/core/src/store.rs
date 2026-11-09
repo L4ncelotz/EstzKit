@@ -1,5 +1,7 @@
 //! SQLite persistence for plans, steps, and detection results.
 
+use std::path::{Path, PathBuf};
+
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -18,10 +20,61 @@ pub struct Store {
 }
 
 impl Store {
-    /// Open (creating if needed) the store at `path`, creating tables.
-    pub fn open(path: &str) -> CoreResult<Self> {
-        let conn = Connection::open(path)?;
+    /// Return the resolved default path for the SQLite store:
+    /// 1. `$ESTZKIT_STORE` environment variable if set and non-empty.
+    /// 2. On Windows: `%LOCALAPPDATA%\EstzKit\state.db` (fallback `%APPDATA%\EstzKit\state.db`).
+    /// 3. On other platforms: `$HOME/.local/share/estzkit/state.db`.
+    /// 4. Fallback: `estzkit.db` in current working directory.
+    pub fn default_path() -> PathBuf {
+        if let Ok(store) = std::env::var("ESTZKIT_STORE") {
+            if !store.trim().is_empty() {
+                return PathBuf::from(store);
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                if !local.trim().is_empty() {
+                    return PathBuf::from(local).join("EstzKit").join("state.db");
+                }
+            }
+            if let Ok(roaming) = std::env::var("APPDATA") {
+                if !roaming.trim().is_empty() {
+                    return PathBuf::from(roaming).join("EstzKit").join("state.db");
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                if !home.trim().is_empty() {
+                    return PathBuf::from(home)
+                        .join(".local")
+                        .join("share")
+                        .join("estzkit")
+                        .join("state.db");
+                }
+            }
+        }
+        PathBuf::from("estzkit.db")
+    }
+
+    /// Open (creating if needed) the store at `path`, ensuring parent directories
+    /// exist and creating schema tables.
+    pub fn open(path: impl AsRef<Path>) -> CoreResult<Self> {
+        let p = path.as_ref();
+        if let Some(parent) = p.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let conn = Connection::open(p)?;
         Self::init(conn)
+    }
+
+    /// Open the store using [`Store::default_path`].
+    pub fn open_default() -> CoreResult<Self> {
+        Self::open(Self::default_path())
     }
 
     /// Open an in-memory store (used by tests).
@@ -208,5 +261,15 @@ mod tests {
         assert_eq!(steps[1].state, "Completed");
         assert_eq!(steps[1].exit_code, Some(0));
         assert_eq!(steps[1].message.as_deref(), Some("installed ok"));
+    }
+
+    #[test]
+    fn open_creates_parent_directories() {
+        let temp_dir = std::env::temp_dir().join(format!("estzkit-store-test-{}", std::process::id()));
+        let db_path = temp_dir.join("sub").join("state.db");
+        let store = Store::open(&db_path).expect("open with nested path");
+        assert!(db_path.exists());
+        drop(store);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
